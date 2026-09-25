@@ -82,12 +82,9 @@ Where it departs from the spec, and why: the spec asks for a single `.html` file
 ## Data model
 The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, goal:{sense,expr,target}, variables:[{id,name,shape,type,lower,upper,init,labels}], constraints:[{id,label,expr,enabled}], parameters:[{id,name,expr,slider}], settings, scenarios, updatedAt}`. No server tables are used; everything is stored in the browser.
 
-## Not yet implemented and next steps
+## Not yet implemented
 - Sparse revised simplex (LU) for LPs much larger than about 2,000×2,000.
 - Cutting planes and presolve for harder MIPs.
 - Sensitivity ranging (the allowable increase and decrease on the RHS and costs).
 - An optional one-file build script that inlines the CSS and JS into a single `nadir.html`.
 - Service worker for installable offline use.
-
-## Deploy
-Use the **Publish tab** to publish the site.
