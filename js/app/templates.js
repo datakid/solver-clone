@@ -9,7 +9,17 @@
 
   const list = [
     {
-      key: 'product-mix', name: 'Product mix', kind: 'int LP',
+      key: 'bakery', name: 'Bakery', kind: 'starter', icon: 'cake', blurb: 'How many loaves and cakes to bake for the most profit?',
+      note: ['Decide how many loaves and cakes to bake today for the most profit.', 'Oven time and flour are limited, and only 30 cakes will sell. A perfect first model.'],
+      model: {
+        goal: { sense: 'max', expr: 'loafProfit * loaves + cakeProfit * cakes' },
+        variables: [V('loaves', { type: 'int' }), V('cakes', { type: 'int' })],
+        constraints: [R('Oven time', '0.5 * loaves + 1.5 * cakes <= ovenHours'), R('Flour', '1 * loaves + 0.5 * cakes <= flourKg'), R('Cake demand', 'cakes <= 30')],
+        parameters: [P('loafProfit', '4', { min: 0, max: 20, step: 0.5 }), P('cakeProfit', '10', { min: 0, max: 30, step: 0.5 }), P('ovenHours', '60', { min: 0, max: 120, step: 1 }), P('flourKg', '70', { min: 0, max: 150, step: 1 })]
+      }
+    },
+    {
+      key: 'product-mix', name: 'Product mix', kind: 'int LP', icon: 'box', blurb: 'Build chairs, tables and desks for the most profit.',
       note: ['Choose how many chairs, tables and desks to build for the most profit.', 'Wood and labour are limited; you can only build whole pieces.'],
       model: {
         goal: { sense: 'max', expr: 'sum(profit * make)' },
@@ -19,7 +29,7 @@
       }
     },
     {
-      key: 'diet', name: 'Diet', kind: 'LP',
+      key: 'diet', name: 'Diet', kind: 'LP', icon: 'leaf', blurb: 'The cheapest mix of foods that meets daily nutrition.',
       note: ['Find the cheapest mix of foods that meets daily nutrition targets.', 'Each food has a cost per serving and a nutrient profile; servings are capped.'],
       model: {
         goal: { sense: 'min', expr: 'dot(cost, serve)' },
@@ -29,7 +39,7 @@
       }
     },
     {
-      key: 'transport', name: 'Transportation', kind: '2D LP',
+      key: 'transport', name: 'Transportation', kind: '2D LP', icon: 'truck', blurb: 'Ship from two plants to three stores at the lowest cost.',
       note: ['Ship goods from two plants to three stores at the lowest cost.', 'Row sums are what each plant sends; column sums are what each store receives.'],
       model: {
         goal: { sense: 'min', expr: 'sum(cost * ship)' },
@@ -39,7 +49,7 @@
       }
     },
     {
-      key: 'assignment', name: 'Assignment', kind: 'bin 2D',
+      key: 'assignment', name: 'Assignment', kind: 'bin 2D', icon: 'users', blurb: 'Give four people one task each, in the least total time.',
       note: ['Give each of four people exactly one task so the total time is lowest.', 'A yes/no table: every row and every column must sum to one.'],
       model: {
         goal: { sense: 'min', expr: 'sum(minutes * assign)' },
@@ -49,7 +59,7 @@
       }
     },
     {
-      key: 'knapsack', name: 'Knapsack', kind: 'bin',
+      key: 'knapsack', name: 'Knapsack', kind: 'bin', icon: 'backpack', blurb: 'Pack the most valuable gear under a weight limit.',
       note: ['Pick which items to pack for the most value without going over the weight limit.', 'Each item is either taken or left: a classic yes/no decision.'],
       model: {
         goal: { sense: 'max', expr: 'sum(value * take)' },
@@ -59,7 +69,7 @@
       }
     },
     {
-      key: 'portfolio', name: 'Portfolio', kind: 'NLP',
+      key: 'portfolio', name: 'Portfolio', kind: 'NLP', icon: 'pie', blurb: 'Reach a target return with the least risk.',
       note: ['Split money across four assets to reach a target return with the least risk.', 'Risk is the quadratic form wᵀΣw; weights sum to one and no shorting.'],
       model: {
         goal: { sense: 'min', expr: 'quad(w, cov)' },
@@ -69,7 +79,17 @@
       }
     },
     {
-      key: 'curve-fit', name: 'Curve fit', kind: 'least squares',
+      key: 'ad-budget', name: 'Ad budget', kind: 'NLP', icon: 'bolt', blurb: 'Split a budget across channels with diminishing returns.',
+      note: ['Split a marketing budget across three channels to reach the most people.', 'Each extra dollar reaches fewer new people than the last — so spreading out pays.'],
+      model: {
+        goal: { sense: 'max', expr: 'sum(reach * log(1 + spend / 1000))' },
+        variables: [V('spend', { shape: '3', labels: ['Search', 'Social', 'Radio'], init: '[1000, 1000, 1000]' })],
+        constraints: [R('Budget', 'sum(spend) <= budget')],
+        parameters: [P('reach', '[5000, 8000, 3000]'), P('budget', '10000', { min: 0, max: 30000, step: 500 })]
+      }
+    },
+    {
+      key: 'curve-fit', name: 'Curve fit', kind: 'least squares', icon: 'trend', blurb: 'Fit an exponential curve to measured points.',
       note: ['Fit y = a·exp(b·t) + c to measured points by least squares.', 'The goal is the sum of squared residuals; nothing else is needed.'],
       model: {
         goal: { sense: 'min', expr: 'sumsq(a * exp(b * t) + c - y)' },
@@ -79,7 +99,7 @@
       }
     },
     {
-      key: 'break-even', name: 'Break-even', kind: 'Target',
+      key: 'break-even', name: 'Break-even', kind: 'Target', icon: 'tag', blurb: 'The sales volume where profit is exactly zero.',
       note: ['Find the sales volume where profit is exactly zero.', 'Target mode solves goal = value instead of maximizing.'],
       model: {
         goal: { sense: 'target', expr: 'units * (price - unitCost) - fixedCost', target: '0' },
@@ -101,13 +121,14 @@
     return m;
   }
 
-  function open(key) {
+  function open(key, opts) {
+    const o = opts || {};
     const t = list.find((x) => x.key === key);
     if (!t) return;
     const m = build(t);
     S.replace(m);
     N.Drawer && N.Drawer.close();
-    N.toast(`${t.name} template loaded`, { kind: 'info', action: { label: 'Solve', run: () => N.Solve.run() } });
+    if (!o.quiet) N.toast(`${t.name} template loaded`, { kind: 'info', action: { label: 'Solve', run: () => N.Solve.run() } });
   }
 
   N.Templates = { list, build, open };

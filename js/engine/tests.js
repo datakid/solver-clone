@@ -119,6 +119,26 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
+        name: 'Plain words · goals and rules read naturally', run() {
+          const ctx = { labels: { make: ['Chairs', 'Tables', 'Desks'] } };
+          const cases = [
+            [E.explainGoal({ sense: 'max', expr: 'sum(profit * make)' }, ctx), 'Make the total of profit × make as large as possible'],
+            [E.explainGoal({ sense: 'min', expr: 'dot(cost, serve)' }, ctx), 'Make the total of cost × serve as small as possible'],
+            [E.explainGoal({ sense: 'target', expr: 'units * (price - unitCost)', target: '0' }, ctx), 'Get units × (price − unitCost) to exactly 0'],
+            [E.explainRule('sum(wood * make) <= woodStock', ctx), 'The total of wood × make must be at most woodStock'],
+            [E.explainRule('make[3] >= 2', ctx), 'make[Desks] must be at least 2'],
+            [E.explainRule('10 <= x', ctx), 'x must be at least 10'],
+            [E.explainRule('0 <= x + y <= 5', ctx), 'x + y must be between 0 and 5'],
+            [E.explainRule('rowsum(ship) <= supply', { each: 2 }), 'Each row total of ship must be at most supply'],
+            [E.explainRule('x >= lo', { each: 3 }), 'x must be at least lo — for each of the 3'],
+            [E.explainRule('sum(x) = 1', ctx), 'The total of x must equal 1']
+          ];
+          const bad = cases.filter(([a, b]) => a !== b);
+          const broken = E.explainRule('x + <= 3') === null && E.explainGoal({ sense: 'max', expr: '' }) === null;
+          return (!bad.length && broken) || JSON.stringify(bad.map(([a, b]) => ({ got: a, want: b })));
+        }
+      },
+      {
         name: 'Performance · 100×100 LP under budget', run() {
           const rand = E.mulberry32(7);
           const A = [], b = [], c = [];

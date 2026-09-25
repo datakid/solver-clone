@@ -62,7 +62,7 @@
     return out;
   }
 
-  const defaultSettings = () => Object.assign({}, E.DEFAULT_SETTINGS, { decimals: 'auto', liveResolve: true, theme: 'system', collapseGiven: null });
+  const defaultSettings = () => Object.assign({}, E.DEFAULT_SETTINGS, { decimals: 'auto', liveResolve: true, theme: 'system', collapseGiven: null, explain: true });
 
   const listeners = new Map();
   const S = {
@@ -81,7 +81,7 @@
     live: null,
     history: [],
     future: [],
-    ui: Object.assign({ goalView: 'form', advanced: {}, givenCollapsed: null, showAdvancedResults: false }, storage(KEY_UI, {})),
+    ui: Object.assign({ goalView: 'form', advanced: {}, givenCollapsed: null, showAdvancedResults: false, toured: false }, storage(KEY_UI, {})),
 
     on(topic, fn) {
       if (!listeners.has(topic)) listeners.set(topic, new Set());
@@ -196,7 +196,7 @@
 
     saveUI(patch) {
       Object.assign(S.ui, patch);
-      store(KEY_UI, { goalView: S.ui.goalView, givenCollapsed: S.ui.givenCollapsed, showAdvancedResults: S.ui.showAdvancedResults });
+      store(KEY_UI, { goalView: S.ui.goalView, givenCollapsed: S.ui.givenCollapsed, showAdvancedResults: S.ui.showAdvancedResults, toured: !!S.ui.toured, showChart: !!S.ui.showChart });
     },
 
     inLibrary(id) { return S.library.some((m) => m.id === (id || S.model.id)); },
@@ -262,6 +262,12 @@
     S.library = storage(KEY_LIBRARY, []).map(normalize);
     const cur = storage(KEY_CURRENT, null);
     S.model = cur ? normalize(cur) : blankModel();
+  };
+  S.isBlank = () => !S.model.variables.length && !S.model.constraints.length && !S.model.parameters.length && E.isBlank(S.model.goal.expr);
+  S.labelMap = () => {
+    const out = {};
+    S.model.variables.forEach((v) => { const n = v.name.trim(); if (n && v.labels && v.labels.length) out[n] = v.labels; });
+    return out;
   };
   S.flushSave = () => saveCurrent.flush();
   S.blankModel = blankModel;

@@ -4,6 +4,17 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## What's new in v2
+- **Plain-English layer** (`js/engine/explain.js`, pure, runs in the worker too). The goal and every rule are read back as a sentence, for example "The total of wood × make must be at most woodStock". Labels are used where they exist (`make[Desks]`). You can turn this off in Settings → Behaviour or from the palette.
+- **"In plain words" result story**: the best plan, the goal compared with your starting values, which rules are holding you back, and the single biggest lever (the largest shadow price, Simplex only). There are also notes that explain the engine choice.
+- **Guided tour** (`js/app/tour.js`): 7 steps with a spotlight. Use ←/→/Enter/Esc. If the model is empty it loads the Bakery starter first. Open it from Help, the palette, Settings, the welcome panel, or `?tour`.
+- **Language guide** (`js/app/help.js`): Basics, a searchable function reference with click-to-copy examples, and Reading results (Optimal, Binding, Slack, Shadow price…). Open it with `?guide` or `?guide=functions`.
+- **Welcome and readiness panels**: an animated valley illustration, 3 numbered steps and template cards with icons. Once you start typing, a live checklist ("Ready to solve" / "Almost there") appears, with a one-click action for each missing piece and the engine Nadir will pick.
+- **Friendlier cards**: numbered step badges (these fill in once each step is done) and subtitles. Kind labels are `1.5 / 1, 2 / Y/N`, with column headers on Decide. The Rules card shows suggestion chips when it is empty.
+- **New templates**: Bakery (a scalar starter) and Ad budget (NLP with diminishing returns). All 10 are checked to solve Optimal in the test suite.
+- **Visual polish**: refined tokens, a gradient accent, layered shadows, and staggered entrance, count-up and found-dot animations. The Solve button pulses when the model is ready. There is a floating drawer, blurred scrims, and a collapsible convergence chart ("How Nadir got there"). Dark mode, mobile, print and reduced-motion are all kept.
+- Tests: 20/20 (new: Plain words, Templates solve Optimal).
+
 ## Features
 
 ### Modeling language (`js/engine/syntax.js`, `model.js`)
@@ -50,8 +61,10 @@ Product mix, Diet, Transportation, Assignment, Knapsack, Portfolio, Curve fit, B
 | URI | Effect |
 |---|---|
 | `index.html` | App |
-| `index.html?test` | Runs the built-in test suite (18 tests: spec tests 1–10, language, gradient, text round-trip, performance, worker, live-check budget) |
-| `index.html?template=<key>` | Loads a template (`product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `break-even`) |
+| `index.html?test` | Runs the built-in test suite (20 tests: spec tests 1–10, language, gradient, text round-trip, plain words, performance, worker, all templates, live-check budget) |
+| `index.html?tour` | Starts the guided tour |
+| `index.html?guide[=functions\|results]` | Opens the Language guide |
+| `index.html?template=<key>` | Loads a template (`bakery`, `ad-budget`, `product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `break-even`) |
 | `&solve` | Solves right after loading |
 | `&text` | Opens Text view |
 | `&theme=dark\|light\|system` | Sets the theme |

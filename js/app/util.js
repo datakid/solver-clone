@@ -49,7 +49,28 @@
     lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
     link: '<path d="M10 14a4.5 4.5 0 006.4 0l3-3a4.5 4.5 0 00-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 00-6.4 0l-3 3a4.5 4.5 0 006.4 6.4l1-1"/>',
     toggle: '<rect x="2.5" y="7" width="19" height="10" rx="5"/><circle cx="16.5" cy="12" r="2.5"/>',
-    eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>'
+    eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 014.8.9c0 1.7-2.4 2.2-2.4 3.7M12 17.2v0"/>',
+    compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+    book: '<path d="M4 5.5A1.5 1.5 0 015.5 4H11v16H5.5A1.5 1.5 0 014 18.5zM20 5.5A1.5 1.5 0 0018.5 4H13v16h5.5a1.5 1.5 0 001.5-1.5z"/>',
+    sparkle: '<path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 16v4M16.5 18h4"/>',
+    arrowRight: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    arrowLeft: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+    box: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
+    leaf: '<path d="M5 19c0-8 5-14 15-14 0 10-6 15-14 15"/><path d="M5 19l8-8"/>',
+    truck: '<path d="M3 6.5h11v9H3zM14 10h4l3 3v2.5h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+    users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><path d="M15.5 5.6a3 3 0 010 5.8M17.5 14.8c1.8.6 3 2.2 3.4 4.7"/>',
+    backpack: '<path d="M6 9a6 6 0 0112 0v10a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 016 19z"/><path d="M9.5 4.5V3.5h5v1M9 13h6v4H9z"/>',
+    pie: '<path d="M12 3.5v8.5h8.5A8.5 8.5 0 1112 3.5z"/><path d="M15 3.9A8.5 8.5 0 0120.1 9H15z"/>',
+    trend: '<path d="M3.5 17.5l6-6 4 4 7-8"/><path d="M15.5 7.5h5v5"/>',
+    scale: '<path d="M12 4v16M7 20h10M5 8h14M5 8l-2.5 6a2.5 2.5 0 005 0zM19 8l-2.5 6a2.5 2.5 0 005 0z"/>',
+    tag: '<path d="M3.5 12.5V4.5a1 1 0 011-1h8l8 8-9 9z"/><circle cx="8" cy="8" r="1.4"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    bolt: '<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>',
+    quote: '<path d="M9.5 7H6a1.5 1.5 0 00-1.5 1.5V12H9v1a3 3 0 01-3 3M19.5 7H16a1.5 1.5 0 00-1.5 1.5V12H19v1a3 3 0 01-3 3"/>',
+    arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    cake: '<path d="M4 20.5h16M5.5 20.5v-8h13v8M5.5 16c2.2 1.4 4.3 1.4 6.5 0s4.3-1.4 6.5 0M12 12.5V9M12 6.4v0"/>',
+    arrowDown: '<path d="M12 5v14M6 13l6 6 6-6"/>'
   };
 
   function icon(name, cls) {
@@ -310,6 +331,24 @@
     return spec.split('+').map((k) => (k === 'Mod' ? MOD : k === 'Shift' ? (isMac ? '⇧' : 'Shift+') : k === 'Alt' ? (isMac ? '⌥' : 'Alt+') : k === 'Enter' ? '↵' : k)).join(isMac ? '' : '').replace(/Ctrl(?!\+)/, 'Ctrl+');
   }
 
+  const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many || one + 's'}`;
+  const joinWords = (items) => (items.length <= 1 ? items.join('') : items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1]);
+
+  const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function countUp(el, from, to, ms) {
+    if (!Number.isFinite(to)) { el.textContent = fmt(to); return; }
+    if (!Number.isFinite(from) || from === to || reduceMotion()) { el.textContent = fmt(to); return; }
+    const t0 = performance.now(), dur = ms || 520;
+    const step = (now) => {
+      if (!el.isConnected) return;
+      const p = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - p, 3);
+      el.textContent = p >= 1 ? fmt(to) : fmt(from + (to - from) * e, Number.isInteger(to) && Number.isInteger(from) ? { decimals: 0 } : null);
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
   function storage(key, fallback) {
     try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
   }
@@ -317,5 +356,7 @@
     try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
   }
 
-  N.util = { ICONS, icon, LOGO, esc, h, frag, fmt, debounce, fuzzy, markText, download, copyText, encodeShare, decodeShare, parseTable, toNumber, toTSV, toCSV, literal, safeName, timeAgo, isMac, MOD, keys, keyText, storage, store };
+  const VALLEY = '<svg class="valley-art" viewBox="0 0 240 120" aria-hidden="true"><defs><linearGradient id="valley-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".16"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><path class="valley-area" d="M10 22C70 22 84 100 120 100S170 22 230 22V120H10z" fill="url(#valley-fill)"/><path class="valley-grid" d="M10 100H230M10 61H230" /><path class="valley-min" d="M120 100V116"/><text class="valley-label" x="128" y="116">NADIR</text><path id="valley-curve" class="valley-curve" d="M10 22C70 22 84 100 120 100S170 22 230 22" pathLength="1"/><g class="valley-ball"><circle r="9" class="valley-halo"/><circle r="6" class="valley-dot"/><animateMotion dur="2.2s" begin="0s" fill="freeze" calcMode="spline" keyPoints="0;0.5;0.66;0.44;0.53;0.5" keyTimes="0;0.38;0.56;0.74;0.88;1" keySplines="0.5 0 0.6 1;0.3 0 0.5 1;0.4 0 0.5 1;0.4 0 0.5 1;0.4 0 0.5 1"><mpath href="#valley-curve"/></animateMotion></g></svg>';
+
+  N.util = { ICONS, icon, LOGO, VALLEY, esc, h, frag, fmt, debounce, fuzzy, markText, download, copyText, encodeShare, decodeShare, parseTable, toNumber, toTSV, toCSV, literal, safeName, timeAgo, isMac, MOD, keys, keyText, storage, store, plural, joinWords, countUp, reduceMotion };
 })(window.Nadir = window.Nadir || {});

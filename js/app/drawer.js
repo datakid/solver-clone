@@ -133,8 +133,8 @@
   function templates() {
     const wrap = h('div', { class: 'list' });
     N.Templates.list.forEach((t) => {
-      const b = h('button', { class: 'template-card', type: 'button' });
-      b.innerHTML = `<strong>${esc(t.name)}<span class="chip">${esc(t.kind)}</span></strong><span>${esc(t.note[0])}</span><span class="faint">${esc(t.note[1])}</span>`;
+      const b = h('button', { class: 'template-card template-card-wide', type: 'button' });
+      b.innerHTML = `<span class="template-ic">${icon(t.icon || 'layers', 'icon-sm')}</span><strong>${esc(t.name)}<span class="chip">${esc(t.kind)}</span></strong><span>${esc(t.note[0])}</span><span class="faint">${esc(t.note[1])}</span>`;
       b.addEventListener('click', () => {
         if (hasContent() && S.saveState() !== 'saved') {
           O.dialog({ title: `Open ${t.name}?`, body: '<p>The current model has unsaved changes.</p>', actions: [{ label: 'Cancel' }, { label: 'Discard', kind: 'danger', run: () => N.Templates.open(t.key) }, { label: 'Save and open', kind: 'primary', run: () => { S.saveToLibrary(); N.Templates.open(t.key); } }] });
@@ -331,7 +331,11 @@
         num('nodeLimit', 'Node limit', { step: '1000', min: '10' }))),
       section('Behaviour',
         toggle('nonNegative', 'Unbounded decisions are non-negative', 'Like Excel Solver. Type -inf as a lower bound to allow negatives.'),
-        toggle('liveResolve', 'Live re-solve', 'Re-solve as sliders and given values change, when the last solve took under 150 ms.')),
+        toggle('liveResolve', 'Live re-solve', 'Re-solve as sliders and given values change, when the last solve took under 150 ms.'),
+        toggle('explain', 'Plain-English lines', 'Repeat the goal and each rule back as a sentence, and summarise results in plain words.')),
+      section('Help', h('div', { class: 'preset-row' },
+        (() => { const b = h('button', { class: 'btn btn-outline btn-sm', type: 'button', html: icon('compass', 'icon-sm') + 'Take the tour' }); b.addEventListener('click', () => { close(); N.Tour.start(); }); return b; })(),
+        (() => { const b = h('button', { class: 'btn btn-outline btn-sm', type: 'button', html: icon('book', 'icon-sm') + 'Language guide' }); b.addEventListener('click', () => { close(); N.Help.guide(); }); return b; })())),
       section('Display', h('div', { class: 'settings-grid' },
         h('div', { class: 'full' }, h('span', { class: 'field-label' }, 'Theme'), theme.el),
         h('label', null, h('span', { class: 'field-label' }, 'Decimals'), dec))),

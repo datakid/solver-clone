@@ -7,18 +7,24 @@
 
   function shell(id, title, opts) {
     const o = opts || {};
-    const el = h('section', { class: 'card', id, 'aria-labelledby': id + '-title' });
+    const el = h('section', { class: 'card' + (o.step ? ' card-step' : ''), id, 'aria-labelledby': id + '-title' });
     const head = h('header', { class: 'card-head' });
     const label = h('h2', { class: 'label-caps', id: id + '-title' }, title);
     const count = h('span', { class: 'chip', 'aria-label': 'count' }, '0');
     if (o.count !== false) label.append(count);
     const actions = h('div', { class: 'card-head-actions' });
-    head.append(label, actions);
+    let sub = null;
+    if (o.step) {
+      const badge = h('span', { class: 'step-badge', 'aria-hidden': 'true' }, String(o.step));
+      sub = h('p', { class: 'card-sub' }, o.sub || '');
+      const titles = h('div', { class: 'card-titles' }, label, sub);
+      head.append(badge, titles, actions);
+    } else head.append(label, actions);
     const body = h('div', { class: 'card-body' });
     el.append(head, body);
     let foot = null;
     if (o.foot) { foot = h('footer', { class: 'card-foot', 'aria-live': 'polite' }); el.append(foot); }
-    return { el, head, actions, body, foot, count, setCount(n) { if (count.textContent !== String(n)) count.textContent = String(n); } };
+    return { el, head, actions, body, foot, count, sub, setCount(n) { if (count.textContent !== String(n)) count.textContent = String(n); el.classList.toggle('is-filled', n > 0); } };
   }
 
   function editField(item, key) {
@@ -27,7 +33,7 @@
   function commitOnBlur(el) { el.addEventListener('focusout', (e) => { if (!el.contains(e.relatedTarget)) S.commitEdit(); }); }
 
   function GoalCard() {
-    const c = shell('goal-card', 'Goal', { count: false });
+    const c = shell('goal-card', 'Goal', { count: false, step: 1, sub: 'What do you want as big — or as small — as possible?' });
     const view = segmented([{ value: 'form', label: 'Form' }, { value: 'text', label: 'Text' }], S.ui.goalView, (v) => setView(v));
     view.el.setAttribute('aria-label', 'Editor view');
     c.actions.append(view.el);
@@ -36,7 +42,7 @@
       { value: 'max', label: 'Maximize' }, { value: 'min', label: 'Minimize' }, { value: 'target', label: 'Target' }
     ], S.model.goal.sense, (v) => { S.edit((m) => { m.goal.sense = v; if (v === 'target' && m.goal.target == null) m.goal.target = ''; }, { undo: true }); syncTarget(); if (v === 'target') target.focus('end'); }, 'segmented-lg');
     sense.el.setAttribute('aria-label', 'Goal direction');
-    const expr = N.Field.create({ size: 'lg', placeholder: 'e.g. sum(profit * make)', ariaLabel: 'Goal expression', id: 'goal-input', onInput: editField(() => S.model.goal, 'expr'), onKey: (e) => { if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); N.Cards.focusFirstRule(); } } });
+    const expr = N.Field.create({ size: 'lg', placeholder: 'e.g. 40*chairs + 90*tables', ariaLabel: 'Goal expression', id: 'goal-input', onInput: editField(() => S.model.goal, 'expr'), onKey: (e) => { if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); N.Cards.focusFirstRule(); } } });
     const target = N.Field.create({ size: 'lg', placeholder: 'value', ariaLabel: 'Target value', noVars: true, onInput: editField(() => S.model.goal, 'target') });
     const targetWrap = h('div', { class: 'goal-target' }, h('span', { class: 'goal-eq' }, '='), target.el);
     const err = N.Field.errorLine();
@@ -45,8 +51,10 @@
     const liveLabel = h('span', null, 'Current value ');
     const targetGap = h('span', { class: 'faint' });
     const engine = h('span', { class: 'engine-hint' });
+    const says = h('p', { class: 'plain-line goal-says', hidden: true });
     const line = h('div', { class: 'goal-line' }, sense.el, expr.el, targetWrap);
-    form.append(line, err.el, terr.el, h('div', { class: 'goal-live' }, h('span', null, liveLabel, liveVal, targetGap), engine));
+    const liveBox = h('span', { class: 'goal-live-val' }, liveLabel, liveVal, targetGap);
+    form.append(line, err.el, terr.el, says, h('div', { class: 'goal-live' }, liveBox, engine));
     commitOnBlur(form);
 
     const text = h('div', { class: 'text-view', hidden: true });
@@ -84,6 +92,8 @@
       text.hidden = v !== 'text';
       document.body.classList.toggle('is-text-view', v === 'text');
       c.el.querySelector('.label-caps').firstChild.textContent = v === 'text' ? 'Model' : 'Goal';
+      if (c.sub) c.sub.textContent = v === 'text' ? 'The whole model as one document — edits apply as you type.' : 'What do you want as big — or as small — as possible?';
+      c.el.classList.toggle('is-text', v === 'text');
       if (v === 'text') ta.focus();
       S.emit('view', v);
     }
@@ -103,11 +113,16 @@
     function live(L) {
       const e = L.errors;
       expr.setError(e.goal); err.set(e.goal);
+      const phrase = S.settings.explain && !e.goal ? E.explainGoal(S.model.goal, { labels: S.labelMap() }) : null;
+      says.hidden = !phrase;
+      if (phrase && says.dataset.t !== phrase) { says.dataset.t = phrase; says.innerHTML = icon('quote', 'icon-xs') + `<span>${esc(phrase)}</span>`; }
       target.setError(e.target); terr.set(S.model.goal.sense === 'target' ? e.target : null);
       const v = L.check ? L.check.goal : null;
       const has = v != null && !e.goal;
-      liveLabel.textContent = has ? 'Current value ' : E.isBlank(S.model.goal.expr) ? 'Write what to optimize' : '';
+      liveLabel.textContent = has ? 'At your current values ' : E.isBlank(S.model.goal.expr) ? 'Write what to optimize, using your decision names' : '';
       liveVal.textContent = has ? fmt(v) : '';
+      liveBox.classList.toggle('has-value', has);
+      c.el.classList.toggle('has-goal', !E.isBlank(S.model.goal.expr) && !e.goal);
       const C = S.compiled;
       targetGap.textContent = has && S.model.goal.sense === 'target' && C && C.target != null ? `  ·  ${fmt(Math.abs(v - C.target))} from target` : '';
       const cls = L.cls;
@@ -124,12 +139,13 @@
   function flash(el) { el.classList.remove('is-flash'); void el.offsetWidth; el.classList.add('is-flash'); setTimeout(() => el.classList.remove('is-flash'), 1300); }
 
   function DecideCard() {
-    const c = shell('decide-card', 'Decide', { foot: true });
+    const c = shell('decide-card', 'Decide', { foot: true, step: 2, sub: 'The numbers Nadir is free to choose.' });
     const list = h('div', { class: 'rows', role: 'list', 'aria-label': 'Decisions' });
-    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Variable</span>' });
+    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Decision</span>' });
     add.addEventListener('click', () => addVar());
-    c.body.append(list, add);
-    const TYPES = [{ value: 'real', label: 'ℝ', tip: 'Real — any value' }, { value: 'int', label: 'ℤ', tip: 'Integer — whole numbers' }, { value: 'bin', label: '0/1', tip: 'Binary — yes or no' }];
+    const colHead = h('div', { class: 'col-head var-head', 'aria-hidden': 'true', html: '<span></span><span>Name</span><span>Size</span><span>Kind</span><span>Allowed range</span>' });
+    c.body.append(colHead, list, add);
+    const TYPES = [{ value: 'real', label: '1.5', tip: 'Any number — decimals allowed', aria: 'Any number' }, { value: 'int', label: '1, 2', tip: 'Whole numbers only', aria: 'Whole numbers' }, { value: 'bin', label: 'Y/N', tip: 'Yes or no — 0 or 1', aria: 'Yes or no' }];
 
     const rows = keyedList(list, (item) => {
       let cur = item;
@@ -138,7 +154,7 @@
       const grip = h('button', { class: 'grip', type: 'button', 'aria-label': 'Drag to reorder (or use arrow keys)', html: icon('grip', 'icon-sm') });
       const name = textInput({ className: 'input-mono name-input', value: item.name, placeholder: 'name', aria: 'Variable name', field: 'name', onInput: (v) => { S.beginEdit(); cur.name = v; S.edit(null, { field: 'name' }); bx.textContent = v.trim() || '·'; } });
       const shape = textInput({ className: 'shape-input', value: item.shape === '1' ? '' : item.shape, placeholder: '1', aria: 'Size — 1, 3, 2x3 or a given name', field: 'shape', onInput: (v) => { S.beginEdit(); cur.shape = v.trim() || '1'; S.edit(null, { field: 'shape' }); } });
-      shape.el.dataset.tip = 'Size: 1, 3, 2x3, or a given name';
+      shape.el.dataset.tip = 'How many: 1 for a single number, 3 for a list, 2x3 for a table';
       const type = segmented(TYPES, item.type, (v) => { S.edit(() => { cur.type = v; }, { undo: true }); syncType(); }, 'segmented-mono');
       type.el.setAttribute('aria-label', 'Type');
       const lower = N.Field.create({ placeholder: '', ariaLabel: 'Lower bound', noVars: true, value: item.lower, onInput: editField(get, 'lower') });
@@ -225,7 +241,7 @@
       if (focusPrev) { const p = S.model.variables[Math.max(0, i - 1)]; if (p) requestAnimationFrame(() => rows.get(p.id).focus()); else add.focus(); }
       if (gone.name.trim()) N.toast(`Removed ${gone.name.trim()}`, { action: { label: 'Undo', run: () => S.undo() } });
     }
-    function sync() { rows.sync(S.model.variables); c.setCount(S.model.variables.length); }
+    function sync() { rows.sync(S.model.variables); c.setCount(S.model.variables.length); colHead.hidden = !S.model.variables.length; }
     function live(L) {
       const C = S.compiled;
       const infos = new Map(C ? C.vars.map((v) => [v.id, v]) : []);
@@ -237,7 +253,7 @@
       if (n !== S.model.variables.length) parts.push(`${fmt(n)} values`);
       if (ints) parts.push(`${fmt(ints)} whole-number`);
       if (errs) parts.push(`${errs} to fix`);
-      const t = S.model.variables.length ? parts.join(' · ') : 'Add the quantities Nadir should choose';
+      const t = S.model.variables.length ? parts.join(' · ') : 'Add something Nadir can change — like how many chairs to build';
       if (c.foot.textContent !== t) c.foot.textContent = t;
     }
     S.on('structure', sync);

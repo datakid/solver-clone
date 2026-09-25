@@ -47,7 +47,8 @@
       btn('share', 'Share link', () => N.IO.shareDialog(), { cls: 'hide-sm' }),
       btn('download', 'Export', () => N.IO.exportDialog(), { keys: 'Mod+Shift+E' }),
       btn('sliders', 'Settings', () => N.Drawer.open('settings'), { cls: 'hide-sm' }),
-      themeBtn);
+      themeBtn,
+      btn('help', 'Help & tour', (e) => N.Help.menu(e.currentTarget), { id: 'help-btn', keys: '?' }));
     inner.append(brand, h('span', { class: 'header-sep' }), h('div', { class: 'model-name-wrap' }, name, state), actions);
     el.append(inner);
     function sync() {
@@ -87,7 +88,7 @@
     const list = [
       ['Solve', 'Mod+Enter'], ['Stop, or close the top overlay', 'Esc'], ['Command palette', 'Mod+K'], ['Save to library', 'Mod+S'],
       ['Export', 'Mod+Shift+E'], ['Undo / redo structure', 'Mod+Z'], ['', 'Mod+Shift+Z'], ['New rule', 'Alt+N'], ['Next rule / new rule', 'Enter'],
-      ['Delete an empty row', 'Backspace'], ['Reorder a row (grip focused)', '↑'], ['Accept a suggestion', 'Tab'], ['This sheet', '?']
+      ['Delete an empty row', 'Backspace'], ['Reorder a row (grip focused)', '↑'], ['Accept a suggestion', 'Tab'], ['Next / previous tour step', '→'], ['This sheet', '?']
     ];
     const g = h('div', { class: 'shortcut-list' });
     list.forEach(([t, k]) => { g.append(h('span', null, t), h('span', { class: 'keys', html: keys(k) })); });
@@ -128,6 +129,11 @@
     act('Redo', 'redo', redo, { keys: 'Mod+Shift+Z' });
     act('Keyboard shortcuts', 'keyboard', shortcutSheet, { keys: '?' });
     act('Run test suite', 'flask', runTests);
+    act('Take the guided tour', 'compass', () => N.Tour.start(), { keywords: 'help onboarding learn intro' });
+    act('Language guide', 'book', () => N.Help.guide(), { keywords: 'help syntax docs' });
+    act('Function reference', 'function', () => N.Help.guide('functions'), { keywords: 'help sum dot rowsum' });
+    act('Reading the results', 'info', () => N.Help.guide('results'), { keywords: 'help optimal binding slack shadow' });
+    act(S.settings.explain ? 'Hide plain-English lines' : 'Show plain-English lines', 'quote', () => { S.setSettings({ explain: !S.settings.explain }); N.Live.flush(); }, { keywords: 'explain words sentence' });
     N.Templates.list.forEach((t) => A.push({ group: 'Templates', label: `Template: ${t.name}`, icon: 'layers', hint: t.kind, run: () => N.Templates.open(t.key), keywords: t.note.join(' ') }));
     S.library.forEach((m) => A.push({ group: 'Library', label: m.name, icon: 'file', hint: N.util.timeAgo(m.updatedAt), run: () => { S.replace(JSON.parse(JSON.stringify(m))); N.toast(`Opened ${m.name}`, { kind: 'info' }); } }));
     return A;
@@ -177,6 +183,15 @@
         workerMs = performance.now() - t0;
       } catch (e) { workerOk = false; }
       results.push({ name: `Worker round-trip (${N.WorkerHost.inWorker ? 'Web Worker' : 'fallback'})`, ok: workerOk, detail: workerOk ? '' : 'Worker solve failed', ms: Math.round(workerMs) });
+      const tt = performance.now();
+      const tpl = [];
+      for (const t of N.Templates.list) {
+        try {
+          const r = await N.WorkerHost.solve(JSON.parse(JSON.stringify(N.Templates.build(t))), {});
+          if (r.status !== 'optimal') tpl.push(`${t.name}: ${r.status}`);
+        } catch (e) { tpl.push(`${t.name}: ${e.message}`); }
+      }
+      results.push({ name: `Templates · all ${N.Templates.list.length} solve Optimal`, ok: !tpl.length, detail: tpl.join('\n'), ms: Math.round(performance.now() - tt) });
       const tp = performance.now();
       const big = S.blankModel();
       big.variables = [{ id: 'v', name: 'x', shape: '1000', type: 'real', lower: '', upper: '', init: '', labels: [] }];
@@ -215,7 +230,7 @@
     N.Cards.focusFirstRule = () => rules.focusFirst();
     const dock = document.getElementById('solve-dock');
     dock.append(N.Solve.button());
-    N.App = { goal, decide, rules, given, newModel, setTheme, runTests };
+    N.App = { goal, decide, rules, given, newModel, setTheme, runTests, shortcutSheet };
     S.on('view', (v) => { [decide.el, rules.el, given.el].forEach((el) => { el.hidden = v === 'text'; }); });
     if (S.ui.goalView === 'text') [decide.el, rules.el, given.el].forEach((el) => { el.hidden = true; });
     const resCol = document.getElementById('results-col');
@@ -236,8 +251,10 @@
     if (qs.has('text')) goal.setView('text');
     if (qs.has('solve')) setTimeout(() => N.Solve.run(), 50);
     if (qs.has('theme')) setTheme(qs.get('theme'));
+    if (qs.has('tour')) setTimeout(() => N.Tour.start(), 120);
+    if (qs.has('guide')) N.Help.guide(qs.get('guide') || undefined);
     if (qs.has('test')) runTests();
-    else if (!S.model.variables.length && E.isBlank(S.model.goal.expr) && !S.library.length) goal.focus();
+    else if (!qs.has('tour') && !S.model.variables.length && E.isBlank(S.model.goal.expr) && !S.library.length && window.matchMedia('(min-width: 961px)').matches) goal.focus();
     document.body.classList.add('is-ready');
   }
 

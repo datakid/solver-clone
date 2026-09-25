@@ -7,11 +7,28 @@
   const { shell, flash, editField, commitOnBlur } = N.Cards;
 
   function RulesCard() {
-    const c = shell('rules-card', 'Subject to', { foot: true });
+    const c = shell('rules-card', 'Subject to', { foot: true, step: 3, sub: 'Limits the answer must respect — budgets, capacities, minimums.' });
     const list = h('div', { class: 'rows', role: 'list', 'aria-label': 'Rules' });
     const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Rule</span>' + keys('Alt+N') });
     add.addEventListener('click', () => addRule());
-    c.body.append(list, add);
+    const ideas = h('div', { class: 'rule-ideas', hidden: true });
+    c.body.append(list, add, ideas);
+    function syncIdeas() {
+      const vars = S.model.variables.map((v) => v.name.trim()).filter(Boolean);
+      const show = !S.model.constraints.length && vars.length > 0;
+      ideas.hidden = !show;
+      if (!show) return;
+      const a = vars[0], b = vars[1];
+      const sum = vars.length > 1 ? `${a} + ${b}` : (S.compiled && S.compiled.vars[0] && S.compiled.vars[0].size > 1 ? `sum(${a})` : a);
+      const sugg = [[`${sum} <= 100`, 'a total cap'], [`${a} >= 10`, 'a minimum']];
+      if (b) sugg.push([`${a} <= 2 * ${b}`, 'a ratio']);
+      ideas.replaceChildren(h('span', { class: 'faint' }, 'Try:'));
+      sugg.forEach(([ex, why]) => {
+        const bt = h('button', { class: 'idea-chip', type: 'button', 'data-tip': 'Add ' + why, html: `<span class="mono">${esc(ex)}</span>` });
+        bt.addEventListener('click', () => addRule(null, ex));
+        ideas.append(bt);
+      });
+    }
 
     const rows = keyedList(list, (item) => {
       let cur = item;
@@ -47,7 +64,8 @@
       errl.el.classList.add('row-sub');
       errl.el.style.paddingLeft = '206px';
       const meta = h('div', { class: 'rule-meta row-sub' });
-      el.append(grip, sw.el, label.el, expr.el, pill, del, errl.el, meta);
+      const says = h('div', { class: 'plain-line rule-says row-sub', hidden: true });
+      el.append(grip, sw.el, label.el, expr.el, pill, del, errl.el, says, meta);
       el.classList.toggle('is-disabled', item.enabled === false);
       commitOnBlur(el);
       let pillKey = '';
@@ -57,6 +75,9 @@
         live(err, st, nonlinear) {
           expr.setError(err);
           errl.set(err);
+          const phrase = S.settings.explain && !err && !E.isBlank(cur.expr) ? E.explainRule(cur.expr, { labels: S.labelMap(), each: st && st.scalar > 1 ? st.scalar : 0 }) : null;
+          says.hidden = !phrase;
+          if (phrase && says.dataset.t !== phrase) { says.dataset.t = phrase; says.textContent = phrase; }
           let cls = 'pill pill-muted', html = '—', tip = '';
           if (err) { cls = 'pill pill-bad'; html = icon('x') + 'error'; }
           else if (E.isBlank(cur.expr)) { cls = 'pill pill-muted'; html = 'empty'; }
@@ -64,11 +85,11 @@
           else if (st) {
             if (st.scalar > 1) {
               if (st.off) { cls = 'pill pill-bad'; html = icon('x') + `${fmt(st.off)} of ${fmt(st.count)} off`; tip = `Worst miss ${fmt(st.worst)}`; }
-              else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + `${fmt(st.count)}/${fmt(st.count)} ok`; tip = `${fmt(st.binding)} binding`; }
+              else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + `${fmt(st.count)}/${fmt(st.count)} ok`; tip = `${fmt(st.binding)} binding — exactly at the limit`; }
               else { cls = 'pill pill-ok'; html = icon('check') + `${fmt(st.count)}/${fmt(st.count)} ok`; tip = `Min slack ${fmt(st.slack)}`; }
-            } else if (st.off) { cls = 'pill pill-bad'; html = icon('x') + `off by ${fmt(st.worst)}`; }
-            else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + 'binding'; }
-            else { cls = 'pill pill-ok'; html = icon('check') + `slack ${fmt(st.slack)}`; }
+            } else if (st.off) { cls = 'pill pill-bad'; html = icon('x') + `off by ${fmt(st.worst)}`; tip = 'Not met'; }
+            else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + 'binding'; tip = 'Exactly at the limit'; }
+            else { cls = 'pill pill-ok'; html = icon('check') + `slack ${fmt(st.slack)}`; tip = `Met, with ${fmt(st.slack)} to spare`; }
           }
           const key = cls + html;
           if (key !== pillKey) { pill.className = cls; pill.innerHTML = html; pillKey = key; }
@@ -100,8 +121,9 @@
       if (focusPrev) { const p = S.model.constraints[Math.max(0, i - 1)]; if (p) requestAnimationFrame(() => rows.get(p.id).focus('end')); else add.focus(); }
       if (gone.expr.trim()) N.toast(`Removed ${gone.label || 'rule'}`, { action: { label: 'Undo', run: () => S.undo() } });
     }
-    function sync() { rows.sync(S.model.constraints); c.setCount(S.model.constraints.length); }
+    function sync() { rows.sync(S.model.constraints); c.setCount(S.model.constraints.length); syncIdeas(); }
     function live(L) {
+      syncIdeas();
       const st = L.check ? L.check.rules : {};
       const nl = new Set((L.cls && L.cls.nonlinearRules) || []);
       let scalar = 0, off = 0, enabled = 0, errs = 0, binding = 0;
@@ -115,7 +137,7 @@
       }
       const n = S.model.constraints.length;
       let t;
-      if (!n) t = 'No rules yet — Nadir will only respect the bounds';
+      if (!n) t = 'No rules yet — only the allowed ranges limit the answer';
       else {
         const parts = [`${n} ${n === 1 ? 'rule' : 'rules'}`];
         if (scalar !== enabled) parts.push(`${fmt(scalar)} scalar`);
@@ -138,7 +160,7 @@
   }
 
   function GivenCard() {
-    const c = shell('given-card', 'Given', { foot: true });
+    const c = shell('given-card', 'Given', { foot: true, step: 4, sub: 'Fixed numbers and data — prices, costs, capacities. Paste from Excel.' });
     const collapse = h('button', { class: 'btn btn-ghost btn-icon btn-sm collapse-btn', type: 'button', 'aria-label': 'Collapse', 'aria-expanded': 'true', html: icon('chevronDown', 'icon-sm') });
     const paste = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'data-tip': 'Paste a table from Excel', html: icon('table', 'icon-sm') + '<span>Paste table</span>' });
     c.actions.append(paste, collapse);
@@ -302,7 +324,7 @@
       const parts = n ? [`${n} ${n === 1 ? 'value' : 'values'}`] : [];
       if (cells) parts.push(`${fmt(cells)} table cells`);
       if (errs) parts.push(`${errs} to fix`);
-      const t = n ? parts.join(' · ') : 'Constants and data — paste a table from Excel to start';
+      const t = n ? parts.join(' · ') : 'Name your numbers here so rules read like sentences';
       if (c.foot.textContent !== t) c.foot.textContent = t;
     }
     S.on('structure', sync);

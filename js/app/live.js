@@ -57,5 +57,6 @@
   }
 
   S.on('model', schedule);
+  S.on('settings', (p) => { if (p && 'explain' in p) schedule(); });
   N.Live = { schedule, flush, get ms() { return lastMs; } };
 })(window.Nadir);

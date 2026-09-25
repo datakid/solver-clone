@@ -34,9 +34,19 @@
     if (!on) best.textContent = '';
   }
 
+  function celebrate(r) {
+    if (!btn || (r.status !== 'optimal' && r.status !== 'feasible')) return;
+    btn.classList.remove('is-done');
+    void btn.offsetWidth;
+    btn.classList.add('is-done');
+    setTimeout(() => btn.classList.remove('is-done'), 900);
+  }
+
   function blocked() {
     const n = S.live ? S.live.errorCount : 0;
     btn.classList.toggle('is-blocked', n > 0 && !S.running);
+    const ready = !n && !S.running && S.model.variables.length > 0 && !S.result && !!(S.live && S.live.cls);
+    btn.classList.toggle('is-ready', ready);
     btn.dataset.tip = n > 0 ? `${n} ${n === 1 ? 'line needs' : 'lines need'} fixing` : '';
     if (!n) delete btn.dataset.tip;
   }
@@ -83,12 +93,13 @@
         S.running = false;
         setRunning(false);
         res.clientMs = performance.now() - t0;
+        if (o.quiet) res.quiet = true;
         S.result = res;
         S.stale = false;
         S.lastSolveMs = res.clientMs;
         S.emit('result');
         document.getElementById('results-col').classList.add('is-open');
-        if (!o.quiet) announce(res);
+        if (!o.quiet) { announce(res); celebrate(res); }
       } catch (e) {
         clearTimeout(startTimer);
         cancelAnimationFrame(raf);
@@ -106,6 +117,7 @@
       if (pendingLive) { pendingLive = false; Solve.liveResolve(); }
     },
     stop() { return stop(); },
+    focusFirstError() { return focusFirstError(); },
     keep() {
       const r = S.result;
       if (!r || !r.values) return;
@@ -163,6 +175,7 @@
   }
 
   S.on('live', () => btn && blocked());
+  S.on('result', () => btn && blocked());
   S.on('model', (o) => { if (o && o.param && !o.slider) Solve.liveResolve(); });
 
   N.Solve = Solve;
