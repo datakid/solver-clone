@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Nadir engine check</title></head>
+<body>
+<pre id="out">running…</pre>
+<script src="js/engine/core.js"></script>
+<script src="js/engine/syntax.js"></script>
+<script src="js/engine/ir.js"></script>
+<script src="js/engine/model.js"></script>
+<script src="js/engine/lp.js"></script>
+<script src="js/engine/nlp.js"></script>
+<script src="js/engine/solve.js"></script>
+<script src="js/engine/text.js"></script>
+<script src="js/engine/tests.js"></script>
+<script>
+  const res = Engine.runTests();
+  const lines = res.map((r) => (r.ok ? 'PASS ' : 'FAIL ') + r.name + ' (' + r.ms + 'ms)' + (r.ok ? '' : '\n   ' + r.detail));
+  document.getElementById('out').textContent = lines.join('\n');
+  console.log(lines.join('\n'));
+</script>
+</body></html>
