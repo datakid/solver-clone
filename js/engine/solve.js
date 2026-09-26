@@ -6,7 +6,7 @@ NadirEngine.define('solve', function (E) {
     balanced: { label: 'Balanced', tol: 1e-8, timeLimit: 10, multistart: 4, gap: 0.0001, patience: 150 },
     thorough: { label: 'Thorough', tol: 1e-10, timeLimit: 60, multistart: 16, gap: 0, patience: 400 }
   };
-  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true }, PRESETS.balanced);
+  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true, lpMethod: 'auto', presolve: true, cuts: true, ranging: true }, PRESETS.balanced);
 
   function resolveSettings(s) {
     const out = Object.assign({}, DEFAULTS, s || {});
@@ -15,6 +15,8 @@ NadirEngine.define('solve', function (E) {
       out[k] = Number.isFinite(v) ? v : DEFAULTS[k];
     }
     out.timeLimit = Math.max(0.05, out.timeLimit);
+    out.lpMethod = ['auto', 'revised', 'dense'].includes(out.lpMethod) ? out.lpMethod : 'auto';
+    for (const k of ['presolve', 'cuts', 'ranging']) out[k] = out[k] !== false && out[k] !== 'false';
     out.multistart = Math.max(1, Math.round(out.multistart));
     return out;
   }
@@ -121,7 +123,7 @@ NadirEngine.define('solve', function (E) {
     };
   }
 
-  function rowReport(C, x, rowsIdx, duals, sense) {
+  function rowReport(C, x, rowsIdx, duals, rng) {
     const T = C.ir.evaluate(x);
     const out = [];
     const tolOf = (a, b) => 1e-7 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -138,7 +140,8 @@ NadirEngine.define('solve', function (E) {
         row: ri, id: r.cid, elem: r.elem, label: E.rowName(r, C.ruleInfo[r.cid]), op: r.op,
         lhs: clean(lhs), rhs: clean(rhs), slack: clean(r.op === '=' ? Math.abs(lhs - rhs) : slack),
         binding: Math.abs(lhs - rhs) <= Math.max(tol, 1e-6) , ok,
-        dual: duals ? clean(duals[k]) : null
+        dual: duals ? clean(duals[k]) : null,
+        range: rng && rng[k] ? { inc: clean(rng[k].inc), dec: clean(rng[k].dec) } : null
       });
     });
     return { rows: out, goal: C.goalRoot >= 0 ? T[C.goalRoot] : NaN };
@@ -210,11 +213,15 @@ NadirEngine.define('solve', function (E) {
     if (!engine) return done({ status: 'error', message: 'Simplex needs every line to be linear. Switch the engine to Auto.', engine: null, nonlinearRules: A.nonlinearRules });
 
     const pack = (status, x, extra) => {
-      const rep = x ? rowReport(C, x, A.rowsIdx, extra && extra.duals) : { rows: [], goal: NaN };
+      const rg = extra && extra.ranging && !extra.ranging.skipped ? extra.ranging : null;
+      const rep = x ? rowReport(C, x, A.rowsIdx, extra && extra.duals, rg ? rg.rows : null) : { rows: [], goal: NaN };
       const values = x ? Array.from(x, clean) : null;
       return done(Object.assign({
         status, engine, engineLabel: ENGINE_LABEL[engine], objective: x ? clean(rep.goal) : null,
         values, constraints: rep.rows, reducedCosts: extra && extra.reduced ? Array.from(extra.reduced, clean) : null,
+        costRanges: rg ? rg.cols.map((c) => ({ inc: clean(c.inc), dec: clean(c.dec) })) : null,
+        objWeights: rg && C.sense !== 'target' ? Array.from(A.goalLin ? (() => { const w = new Array(C.n).fill(0); for (const [j, a] of A.goalLin.m) w[j] = clean(a); return w; })() : []) : null,
+        rangingNote: extra && extra.ranging && extra.ranging.skipped ? extra.ranging.reason : null,
         iterations: extra && extra.iterations, sense: C.sense, target: C.target
       }, extra && extra.more));
     };
@@ -224,26 +231,27 @@ NadirEngine.define('solve', function (E) {
       if (C.sense === 'target' && !A.goalLinear) return done({ status: 'error', message: 'Goal is nonlinear', engine });
       let r;
       if (engine === 'simplex') {
-        r = E.solveLP(LP, { deadline, maxIter: settings.maxIter });
+        r = E.solveLP(LP, { deadline, maxIter: settings.maxIter, method: settings.lpMethod === 'dense' ? 'dense' : 'auto', ranging: settings.ranging && C.sense !== 'target' });
+        if (settings.ranging && C.sense !== 'target' && r.status === 'optimal' && !r.ranging && r.method === 'dense') r.ranging = { skipped: true, reason: 'Ranging needs the revised simplex (switch LP method to Auto)' };
         R.push(r.iterations, r.obj, 0, true);
       } else {
         const isInt = C.integer;
-        r = E.branchAndBound(LP, isInt, { deadline, nodeLimit: settings.nodeLimit, gap: settings.gap, maxIter: settings.maxIter }, (ev) => {
+        r = E.branchAndBound(LP, isInt, { deadline, nodeLimit: settings.nodeLimit, gap: settings.gap, maxIter: settings.maxIter, presolve: settings.presolve, cuts: settings.cuts, classic: settings.lpMethod === 'dense' }, (ev) => {
           if (ev.incumbent !== undefined) R.push(ev.nodes, ev.incumbent, 0, true);
           else if (post) R.push(ev.nodes, R.history.length ? R.history[R.history.length - 1] : NaN, NaN, false);
         });
       }
       const iters = engine === 'bb' ? r.iterations : r.iterations;
-      const metric = engine === 'bb' ? { nodes: r.nodes, pivots: r.iterations, gap: r.gap } : { pivots: r.iterations };
+      const metric = engine === 'bb' ? { nodes: r.nodes, pivots: r.iterations, gap: r.gap, mip: r.stats || null } : { pivots: r.iterations, lpMethod: r.method || 'dense', lu: r.lu || null };
       if (r.status === 'optimal' || r.status === 'feasible') {
         const duals = engine === 'simplex' && r.duals ? Float64Array.from(A.rowsIdx.map((_, k) => r.duals[k])) : null;
-        return pack(r.status, r.x, { duals, reduced: engine === 'simplex' ? r.reduced : null, iterations: iters, more: metric });
+        return pack(r.status, r.x, { duals, reduced: engine === 'simplex' ? r.reduced : null, ranging: engine === 'simplex' ? r.ranging : null, iterations: iters, more: metric });
       }
       if (r.status === 'unbounded') return pack('unbounded', null, { iterations: iters, more: metric });
       if (r.status === 'limit' || r.status === 'stopped') return pack('stopped', null, { iterations: iters, more: Object.assign({ message: 'Hit the time or node limit before finding a solution' }, metric) });
       let diagnosis = null;
       if (engine === 'bb') {
-        const relaxed = E.solveLP(LP, { deadline: Date.now() + 2000 });
+        const relaxed = E.solveLP(LP, { deadline: Date.now() + 3000 });
         if (relaxed.status === 'infeasible') diagnosis = diagnoseLP(C, A, Date.now() + 3000);
         else diagnosis = { kind: 'integer', rules: [], message: 'The rules can be met with fractional values, but not with whole numbers.' };
       } else diagnosis = diagnoseLP(C, A, Date.now() + 3000);

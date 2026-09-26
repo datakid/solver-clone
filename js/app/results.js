@@ -262,13 +262,24 @@
         if (best) {
           const nm = names.get(best.id) || best.label;
           const amt = esc(fmt(Math.abs(best.dual)));
+          const rg = best.range;
+          const loosen = best.op === '>=' ? 'dec' : 'inc';
+          const valid = rg && Number.isFinite(rg[loosen]) ? ` That holds for the next <strong class="num">${esc(fmt(rg[loosen]))}</strong> units; beyond that a different rule takes over.` : rg && rg[loosen] === Infinity ? ' That rate holds however far you loosen it.' : '';
           P.push(best.op === '='
-            ? `Biggest lever: changing <strong>${esc(nm)}</strong> by one unit moves the goal by about <strong class="num">${amt}</strong>.`
-            : `Biggest lever: one more unit of room in <strong>${esc(nm)}</strong> would ${sense === 'min' ? 'cut' : 'add'} about <strong class="num">${amt}</strong> ${sense === 'min' ? 'from' : 'to'} the goal.`);
+            ? `Biggest lever: changing <strong>${esc(nm)}</strong> by one unit moves the goal by about <strong class="num">${amt}</strong>.${rg ? ` Valid while the right side stays between <strong class="num">${esc(fmt(best.rhs - rg.dec))}</strong> and <strong class="num">${esc(fmt(best.rhs + rg.inc))}</strong>.` : ''}`
+            : `Biggest lever: one more unit of room in <strong>${esc(nm)}</strong> would ${sense === 'min' ? 'cut' : 'add'} about <strong class="num">${amt}</strong> ${sense === 'min' ? 'from' : 'to'} the goal.${valid}`);
         }
       }
       if (r.engine === 'alm') P.push(`<span class="faint">Nonlinear models can have more than one valley; Nadir compared ${plural(r.starts || 1, 'starting point')} and kept the best.</span>`);
       if (r.engine === 'de') P.push(`<span class="faint">Found by an evolutionary search over ${plural(r.generations || 0, 'generation')}${r.polished ? ', then polished' : ''}.</span>`);
+      if (r.engine === 'bb' && r.mip && (r.mip.cuts || (r.mip.presolve && (r.mip.presolve.rowsRemoved || r.mip.presolve.boundsTightened)))) {
+        const bits = [];
+        const pr = r.mip.presolve;
+        if (pr && pr.rowsRemoved) bits.push(`presolve dropped ${plural(pr.rowsRemoved, 'redundant rule')}`);
+        if (pr && pr.boundsTightened) bits.push(`tightened ${plural(pr.boundsTightened, 'bound')}`);
+        if (r.mip.cuts) bits.push(`added ${plural(r.mip.cuts, 'cutting plane')}`);
+        P.push(`<span class="faint">Before searching, Nadir ${joinWords(bits)}.</span>`);
+      }
       if (r.engine === 'bb' && r.status === 'feasible' && r.gap) P.push(`<span class="faint">Stopped within ${esc(fmt(r.gap * 100))}% of the best possible — close enough under the current settings.</span>`);
       const p = h('div', { class: 'story-text' });
       p.innerHTML = P.map((x) => `<p>${x}</p>`).join('');
@@ -280,7 +291,7 @@
       const sec = h('section', { class: 'res-section' });
       const adv = S.ui.showAdvancedResults;
       const head = h('header', null, h('h3', { class: 'label-caps' }, 'Decisions'));
-      const advBtn = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'aria-pressed': String(adv), 'data-tip': 'Show reduced costs and shadow prices' }, 'Advanced');
+      const advBtn = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'aria-pressed': String(adv), 'data-tip': 'Show reduced costs, shadow prices and sensitivity ranges' }, 'Advanced');
       advBtn.addEventListener('click', () => { S.saveUI({ showAdvancedResults: !S.ui.showAdvancedResults }); render(); });
       head.append(advBtn);
       sec.append(head);
@@ -385,6 +396,58 @@
       return box;
     }
 
+    function rangeTxt(v, base) {
+      if (v == null) return '';
+      if (v === Infinity) return '∞';
+      return fmt(v);
+    }
+
+    function sensitivity(r) {
+      const sec = h('details', { class: 'res-section res-details res-sensitivity' });
+      sec.open = S.ui.showSensitivity !== false;
+      sec.append(h('summary', null, h('h3', { class: 'label-caps' }, 'Sensitivity'), h('span', { class: 'faint res-details-sub' }, 'how far numbers can move before the plan changes'), h('span', { class: 'summary-chev', html: icon('chevronDown', 'icon-xs') })));
+      sec.addEventListener('toggle', () => S.saveUI({ showSensitivity: sec.open }));
+      if (r.rangingNote) { sec.append(h('p', { class: 'field-hint' }, r.rangingNote)); return sec; }
+      const sense = r.sense || S.model.goal.sense;
+      const rows = (r.constraints || []).filter((c) => c.range);
+      if (rows.length) {
+        const t = h('table', { class: 'res-table sens-table' });
+        t.innerHTML = `<thead><tr><th>Rule</th><th class="num">RHS</th><th class="num" data-tip="Goal change per unit of RHS">Shadow</th><th class="num" data-tip="The shadow price stays valid while the RHS stays in this range">Valid RHS range</th></tr></thead>`;
+        const tb = h('tbody');
+        rows.slice(0, S.ui.showAllSens ? rows.length : 30).forEach((c) => {
+          const lo = c.range.dec === Infinity ? -Infinity : c.rhs - c.range.dec;
+          const hi = c.range.inc === Infinity ? Infinity : c.rhs + c.range.inc;
+          const tr = h('tr', { class: 'is-link' });
+          tr.innerHTML = `<td class="nm">${esc(c.label)}</td><td class="num">${esc(fmt(c.rhs))}</td><td class="num">${c.dual == null ? '' : esc(fmt(c.dual))}</td><td class="num sens-range"><span>${esc(fmt(lo))}</span><i></i><span>${esc(fmt(hi))}</span></td>`;
+          tr.addEventListener('click', () => N.App.rules.focusRow(c.id));
+          tb.append(tr);
+        });
+        t.append(tb);
+        sec.append(h('div', { class: 'table-wrap' }, t));
+      }
+      if (r.costRanges) {
+        const t = h('table', { class: 'res-table sens-table' });
+        t.innerHTML = `<thead><tr><th>Decision</th><th class="num" data-tip="The goal coefficient of this decision">Goal weight</th><th class="num" data-tip="The plan stays optimal while the weight stays in this range">Valid weight range</th></tr></thead>`;
+        const tb = h('tbody');
+        let shown = 0;
+        for (const v of r.layout) {
+          for (let i = 0; i < v.size && shown < 40; i++, shown++) {
+            const j = v.offset + i;
+            const cr = r.costRanges[j];
+            const tr = h('tr', { class: 'is-link' + (Math.abs(r.values[j]) < 1e-9 ? ' is-zero' : '') });
+            const w = r.objWeights ? r.objWeights[j] : null;
+            tr.innerHTML = `<td class="nm">${valueLabel(v, i)}</td><td class="num">${w == null ? '' : esc(fmt(w))}</td><td class="num sens-range"><span>${w == null ? '−' + esc(rangeTxt(cr.dec)) : esc(fmt(cr.dec === Infinity ? -Infinity : w - cr.dec))}</span><i></i><span>${w == null ? '+' + esc(rangeTxt(cr.inc)) : esc(fmt(cr.inc === Infinity ? Infinity : w + cr.inc))}</span></td>`;
+            tr.addEventListener('click', () => N.App.decide.focusRow(v.id));
+            tb.append(tr);
+          }
+        }
+        t.append(tb);
+        sec.append(h('div', { class: 'table-wrap' }, t));
+      }
+      sec.append(h('p', { class: 'field-hint' }, sense === 'max' || sense === 'min' ? 'Inside these ranges the same rules stay tight and the shadow prices hold. Outside them, re-solve.' : ''));
+      return sec;
+    }
+
     function convergence(running, hist) {
       const sec = h('details', { class: 'res-section res-details' });
       if (running || S.ui.showChart) sec.open = true;
@@ -470,6 +533,7 @@
       if (!running) { const st = story(r); if (st) wrap.append(st); }
       if (!running && r.values) wrap.append(decisions(r));
       if (!running && r.values && r.status !== 'infeasible') { const rs = rules(r); if (rs) wrap.append(rs); }
+      if (!running && r.values && r.status === 'optimal' && (r.costRanges || r.rangingNote) && S.ui.showAdvancedResults) wrap.append(sensitivity(r));
       const hist = running ? (N.Solve.liveHistory || []) : (r.history || []);
       if (running || hist.length > 1) wrap.append(convergence(running, hist));
       else chart = null;

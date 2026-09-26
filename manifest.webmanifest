@@ -1,0 +1,22 @@
+{
+  "name": "Nadir — Solver",
+  "short_name": "Nadir",
+  "description": "Describe a decision in plain steps and get the best answer. Linear, integer and nonlinear optimization, fully offline.",
+  "id": "./",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#F4F5F1",
+  "theme_color": "#3F7D6E",
+  "categories": ["productivity", "business", "education", "utilities"],
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "New from Bakery example", "url": "./index.html?template=bakery", "icons": [{ "src": "icons/icon.svg", "sizes": "any" }] },
+    { "name": "Guided tour", "url": "./index.html?tour", "icons": [{ "src": "icons/icon.svg", "sizes": "any" }] }
+  ]
+}

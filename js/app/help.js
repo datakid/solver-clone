@@ -97,7 +97,10 @@
         ['Binding / at limit', 'A rule the answer is pressed right up against. Loosen it and the goal can improve.', 'info'],
         ['Slack', 'How much room a rule still has before it starts to bite.', 'ok'],
         ['Shadow price', 'Under Advanced: how much the goal changes if a rule’s limit moves by one unit. The biggest lever.', 'muted'],
-        ['Reduced cost', 'Under Advanced: how much worse the goal gets per unit if you force a zero decision up.', 'muted']
+        ['Reduced cost', 'Under Advanced: how much worse the goal gets per unit if you force a zero decision up.', 'muted'],
+        ['Valid RHS range', 'Under Advanced → Sensitivity: how far a rule’s limit can move while its shadow price still holds.', 'muted'],
+        ['Valid weight range', 'Under Advanced → Sensitivity: how much a goal weight (price, profit) can change before the best plan changes.', 'muted'],
+        ['Presolve & cuts', 'For whole-number models Nadir first simplifies the rules and adds cutting planes, so the search has less to explore.', 'muted']
       ];
       T.forEach(([t, d, k]) => w.append(h('section', { class: 'guide-item guide-term' }, h('h4', null, h('span', { class: 'pill pill-' + k }, t)), h('p', null, d))));
       return w;

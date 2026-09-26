@@ -139,6 +139,129 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
+        name: 'LU · dense and sparse factors solve Bx = b and yᵀB = cᵀ', run() {
+          const rand = E.mulberry32(11);
+          const bad = [];
+          for (const [m, force] of [[40, 'dense'], [40, 'sparse'], [600, 'sparse']]) {
+            const cols = [];
+            for (let k = 0; k < m; k++) {
+              const idx = [k], val = [4 + rand() * 4];
+              for (let t = 0; t < 3; t++) { const i = Math.floor(rand() * m); if (i !== k) { idx.push(i); val.push(rand() * 2 - 1); } }
+              cols.push({ idx, val });
+            }
+            const f = E.luFactor(m, cols, { force });
+            if (!f.ok) { bad.push(`${force} ${m}: singular`); continue; }
+            const b = Float64Array.from({ length: m }, () => rand() * 10 - 5);
+            const x = f.ftran(b), y = f.btran(b);
+            const Bx = new Float64Array(m);
+            let yres = 0;
+            cols.forEach((c, k) => { let s = 0; c.idx.forEach((i, t) => { Bx[i] += c.val[t] * x[k]; s += c.val[t] * y[i]; }); yres = Math.max(yres, Math.abs(s - b[k])); });
+            let xres = 0;
+            for (let i = 0; i < m; i++) xres = Math.max(xres, Math.abs(Bx[i] - b[i]));
+            if (xres > 1e-8 || yres > 1e-8) bad.push(`${force} ${m}: residual ${xres.toExponential(2)} / ${yres.toExponential(2)}`);
+          }
+          const sing = E.luFactor(3, [{ idx: [0], val: [1] }, { idx: [0], val: [2] }, { idx: [2], val: [1] }], { force: 'sparse' });
+          if (sing.ok || sing.singular.length !== 1) bad.push('singular basis not detected');
+          return !bad.length || bad.join('; ');
+        }
+      },
+      {
+        name: 'Revised simplex · matches dense tableau on 60 random LPs', run() {
+          const rand = E.mulberry32(3);
+          const bad = [];
+          for (let t = 0; t < 60 && bad.length < 3; t++) {
+            const n = 2 + Math.floor(rand() * 10), m = 1 + Math.floor(rand() * 9);
+            const rows = [];
+            for (let i = 0; i < m; i++) {
+              const idx = [], val = [];
+              for (let j = 0; j < n; j++) if (rand() < 0.7) { idx.push(j); val.push(Math.round(rand() * 18 - 6)); }
+              const op = ['<=', '<=', '>=', '='][Math.floor(rand() * 4)];
+              rows.push({ idx, val, op, rhs: Math.round(rand() * 40 - (op === '<=' ? 5 : 15)) });
+            }
+            const lower = new Float64Array(n), upper = new Float64Array(n);
+            for (let j = 0; j < n; j++) {
+              const k = rand();
+              lower[j] = k < 0.15 ? -Infinity : k < 0.3 ? -Math.round(rand() * 5) : 0;
+              upper[j] = rand() < 0.5 ? Math.round(3 + rand() * 20) : Infinity;
+            }
+            const c = Float64Array.from({ length: n }, () => Math.round(rand() * 20 - 8));
+            const P = { n, c, c0: 0, rows, lower, upper, maximize: rand() < 0.5 };
+            const a = E.solveDense(P, {}), b = E.solveRevised(P, {});
+            if (a.status !== b.status) { bad.push(`#${t} status ${a.status} vs ${b.status}`); continue; }
+            if (a.status === 'optimal' && Math.abs(a.obj - b.obj) > 1e-6 * Math.max(1, Math.abs(a.obj))) bad.push(`#${t} obj ${a.obj} vs ${b.obj}`);
+          }
+          return !bad.length || bad.join('; ');
+        }
+      },
+      {
+        name: 'Revised simplex · sparse 3,000×3,000 LP (sparse LU)', run() {
+          const rand = E.mulberry32(21);
+          const m = 3000, n = 3000;
+          const rows = [];
+          for (let i = 0; i < m; i++) {
+            const idx = [i], val = [2 + rand() * 3];
+            for (let t = 0; t < 4; t++) { const j = Math.floor(rand() * n); if (j !== i) { idx.push(j); val.push(0.2 + rand()); } }
+            rows.push({ idx, val, op: '<=', rhs: 50 + rand() * 50 });
+          }
+          const c = Float64Array.from({ length: n }, () => 1 + rand() * 9);
+          const P = { n, c, c0: 0, rows, lower: new Float64Array(n), upper: new Float64Array(n).fill(Infinity), maximize: true };
+          const t0 = Date.now();
+          const r = E.solveLP(P, { deadline: Date.now() + 20000, maxIter: 200000 });
+          const ms = Date.now() - t0;
+          if (r.status !== 'optimal') return `status ${r.status} after ${r.iterations} pivots, ${ms}ms`;
+          let viol = 0;
+          for (const row of rows) { let s = 0; row.idx.forEach((j, k) => { s += row.val[k] * r.x[j]; }); viol = Math.max(viol, s - row.rhs); }
+          let dualObj = 0;
+          for (let i = 0; i < m; i++) dualObj += r.duals[i] * rows[i].rhs;
+          const gapRel = Math.abs(dualObj - r.obj) / Math.max(1, Math.abs(r.obj));
+          return (r.lu === 'sparse' && viol < 1e-6 && gapRel < 1e-6 && ms < 15000) || `lu ${r.lu}, viol ${viol}, duality gap ${gapRel}, ${ms}ms`;
+        }
+      },
+      {
+        name: 'Sensitivity ranging · textbook RHS and cost ranges', run() {
+          const m = M({ sense: 'max', expr: '3x + 5y' }, [V('x'), V('y')], [R('x <= 4'), R('2y <= 12'), R('3x + 2y <= 18')]);
+          const r = E.solve(m, {});
+          const rg = r.constraints.map((c) => c.range);
+          const cr = r.costRanges;
+          const ok = rg.every(Boolean) && cr &&
+            rg[0].inc === Infinity && close(rg[0].dec, 2) &&
+            close(rg[1].inc, 6) && close(rg[1].dec, 6) &&
+            close(rg[2].inc, 6) && close(rg[2].dec, 6) &&
+            close(cr[0].inc, 4.5) && close(cr[0].dec, 3) &&
+            cr[1].inc === Infinity && close(cr[1].dec, 3);
+          const mn = E.solve(M({ sense: 'min', expr: '2x+3y' }, [V('x'), V('y')], [R('x+y>=4'), R('x+3y>=6')]), {});
+          const mr = mn.costRanges, rr = mn.constraints.map((c) => c.range);
+          const ok2 = mr && close(mr[0].inc, 1) && close(mr[0].dec, 1) && close(mr[1].inc, 3) && close(mr[1].dec, 1) && close(rr[0].inc, 2) && close(rr[0].dec, 2) && close(rr[1].inc, 6) && close(rr[1].dec, 2);
+          return (ok && ok2) || JSON.stringify({ rg, cr, mr, rr });
+        }
+      },
+      {
+        name: 'MIP · presolve + cuts agree with classic B&B on 40 random models', run() {
+          const rand = E.mulberry32(99);
+          const bad = [];
+          let cuts = 0, removed = 0;
+          for (let t = 0; t < 40 && bad.length < 3; t++) {
+            const n = 3 + Math.floor(rand() * 6), m = 2 + Math.floor(rand() * 5);
+            const rows = [];
+            for (let i = 0; i < m; i++) {
+              const idx = [], val = [];
+              for (let j = 0; j < n; j++) if (rand() < 0.75) { idx.push(j); val.push(1 + Math.floor(rand() * 9)); }
+              rows.push({ idx, val, op: rand() < 0.8 ? '<=' : '>=', rhs: 5 + Math.floor(rand() * 30) });
+            }
+            if (rand() < 0.3) rows.push({ idx: [0], val: [1], op: '<=', rhs: 3 });
+            const isInt = Uint8Array.from({ length: n }, () => (rand() < 0.8 ? 1 : 0));
+            const P = { n, c: Float64Array.from({ length: n }, () => 1 + Math.floor(rand() * 12)), c0: 0, rows, lower: new Float64Array(n), upper: Float64Array.from({ length: n }, () => (rand() < 0.5 ? 1 + Math.floor(rand() * 6) : Infinity)), maximize: true };
+            const a = E.branchAndBoundClassic(P, isInt, { gap: 0 });
+            const b = E.solveMIP(P, isInt, { gap: 0 });
+            cuts += b.stats.cuts; removed += (b.stats.presolve && b.stats.presolve.rowsRemoved) || 0;
+            if (a.status !== b.status) { bad.push(`#${t} ${a.status} vs ${b.status}`); continue; }
+            if (a.status === 'optimal' && Math.abs(a.obj - b.obj) > 1e-6 * Math.max(1, Math.abs(a.obj))) { bad.push(`#${t} obj ${a.obj} vs ${b.obj}`); continue; }
+            if (b.x) for (const r of rows) { let s = 0; r.idx.forEach((j, k) => { s += r.val[k] * b.x[j]; }); if ((r.op === '<=' && s > r.rhs + 1e-6) || (r.op === '>=' && s < r.rhs - 1e-6)) bad.push(`#${t} infeasible incumbent`); }
+          }
+          return (!bad.length && cuts > 0 && removed > 0) || (bad.join('; ') || `cuts ${cuts}, presolve removed ${removed}`);
+        }
+      },
+      {
         name: 'Performance · 100×100 LP under budget', run() {
           const rand = E.mulberry32(7);
           const A = [], b = [], c = [];

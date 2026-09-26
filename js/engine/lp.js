@@ -5,6 +5,20 @@ NadirEngine.define('lp', function (E) {
   const FEAS = 1e-7;
 
   function solveLP(P, opt) {
+    const o = opt || {};
+    const want = o.method || 'auto';
+    const cells = P.rows.length * (P.n * 2 + P.rows.length * 2 + 1);
+    if (want === 'dense') return solveDense(P, o);
+    let r;
+    try { r = E.solveRevised(P, o); } catch (e) { r = { status: 'numerical', iterations: 0, error: e.message }; }
+    if (r.status === 'numerical') {
+      if (cells <= 2.5e7) { const d = solveDense(P, o); d.method = 'dense'; d.fallback = true; return d; }
+      r.status = 'limit';
+    }
+    return r;
+  }
+
+  function solveDense(P, opt) {
     opt = opt || {};
     const maxIter = opt.maxIter || 50000;
     const deadline = opt.deadline || Infinity;
@@ -191,7 +205,7 @@ NadirEngine.define('lp', function (E) {
     }
     let obj = P.c0 || 0;
     for (let j = 0; j < n; j++) obj += (P.c[j] || 0) * x[j];
-    return { status: 'optimal', x, obj, duals, reduced, iterations, bounds: nBound };
+    return { status: 'optimal', x, obj, duals, reduced, iterations, bounds: nBound, method: 'dense' };
   }
 
   class Heap {
@@ -224,6 +238,11 @@ NadirEngine.define('lp', function (E) {
   }
 
   function branchAndBound(P, isInt, opt, onEvent) {
+    if (opt && opt.classic) return branchAndBoundClassic(P, isInt, opt, onEvent);
+    return E.solveMIP(P, isInt, opt, onEvent);
+  }
+
+  function branchAndBoundClassic(P, isInt, opt, onEvent) {
     const t0 = Date.now();
     const deadline = opt.deadline || Infinity;
     const nodeLimit = opt.nodeLimit || 100000;
@@ -264,7 +283,7 @@ NadirEngine.define('lp', function (E) {
       if (!nd) break;
       if (nd.bound >= pruneAt()) continue;
       nodes++;
-      const r = solveLP(P, { lower: nd.lo, upper: nd.hi, deadline, maxIter: opt.maxIter });
+      const r = solveDense(P, { lower: nd.lo, upper: nd.hi, deadline, maxIter: opt.maxIter });
       pivots += r.iterations || 0;
       if (r.status === 'limit') { stopped = true; break; }
       if (r.status === 'infeasible') continue;
@@ -350,7 +369,9 @@ NadirEngine.define('lp', function (E) {
   }
 
   E.solveLP = solveLP;
+  E.solveDense = solveDense;
   E.branchAndBound = branchAndBound;
+  E.branchAndBoundClassic = branchAndBoundClassic;
   E.elasticLP = elastic;
   E.Heap = Heap;
 });

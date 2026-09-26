@@ -61,7 +61,7 @@ Product mix, Diet, Transportation, Assignment, Knapsack, Portfolio, Curve fit, B
 | URI | Effect |
 |---|---|
 | `index.html` | App |
-| `index.html?test` | Runs the built-in test suite (20 tests: spec tests 1–10, language, gradient, text round-trip, plain words, performance, worker, all templates, live-check budget) |
+| `index.html?test` | Runs the built-in test suite (25 tests: spec tests 1–10, language, gradient, text round-trip, plain words, LU, revised vs dense, 3,000×3,000 sparse LP, ranging, MIP v2, performance, worker, all templates, live-check budget) |
 | `index.html?tour` | Starts the guided tour |
 | `index.html?guide[=functions\|results]` | Opens the Language guide |
 | `index.html?template=<key>` | Loads a template (`bakery`, `ad-budget`, `product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `break-even`) |
@@ -70,6 +70,8 @@ Product mix, Diet, Transportation, Assignment, Knapsack, Portfolio, Curve fit, B
 | `&theme=dark\|light\|system` | Sets the theme |
 | `index.html#m=…` / `#j=…` | Opens a shared model |
 | `engine-check.html` | Runs the engine tests alone, without the UI |
+| `sw.js`, `manifest.webmanifest` | Offline service worker and install manifest |
+| `node tools/build.mjs [out.html]` | Builds the single-file `nadir.html` |
 
 ## Architecture
 ```
@@ -95,9 +97,20 @@ Where it departs from the spec, and why: the spec asks for a single `.html` file
 ## Data model
 The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, goal:{sense,expr,target}, variables:[{id,name,shape,type,lower,upper,init,labels}], constraints:[{id,label,expr,enabled}], parameters:[{id,name,expr,slider}], settings, scenarios, updatedAt}`. No server tables are used; everything is stored in the browser.
 
-## Not yet implemented
-- Sparse revised simplex (LU) for LPs much larger than about 2,000×2,000.
-- Cutting planes and presolve for harder MIPs.
-- Sensitivity ranging (the allowable increase and decrease on the RHS and costs).
-- An optional one-file build script that inlines the CSS and JS into a single `nadir.html`.
-- Service worker for installable offline use.
+## v2.1 — solver and platform
+- **Bounded revised simplex** (`js/engine/revised.js`) is now the default LP engine. It keeps column-major sparse storage and handles bounds without extra rows. Phase 1 is composite (minimises infeasibility), then the ratio test uses the Harris two-pass rule. Pricing is Devex-style steepest edge with partial pricing on large models. Bland's rule takes over after degenerate stalls, and the basis is refactorized to verify optimality. Warm starts reuse a basis.
+- **LU factorization** (`js/engine/lu.js`): dense partial pivoting for m ≤ 320, and sparse Markowitz with threshold pivoting (singletons first) above that. It uses product-form eta updates and refactorizes when the etas grow too large. A singular basis is repaired by swapping in slack columns. A sparse 3,000×3,000 LP solves in about 5–8 s in the test suite. The dense tableau is still available (Settings → LP method) and is the automatic fallback if the revised method hits numerical trouble.
+- **MIP presolve** (`js/engine/mip.js`): empty or singleton rows become bounds, activity-based bound tightening, redundant-row removal, big-M coefficient tightening for binaries, and early infeasibility detection.
+- **Cutting planes**: up to 4 rounds of Gomory mixed-integer cuts at the root, with efficacy ranking and filtering for numerical safety. These are followed by a round-and-fix heuristic.
+- **Branch & bound v2**: node bound propagation, warm-started child LPs, depth-first search until an incumbent is found, then best-bound. The classic v1 B&B is kept (Dense LP method).
+- **Sensitivity ranging**: allowable increase and decrease for every rule's right-hand side (the range where the shadow price holds) and every goal weight (the range where the plan stays optimal). You can see them under Results → Advanced → Sensitivity. They are also included in the CSV (Excel `1E+30` convention for infinite values), Copy for Excel and Markdown. The "Biggest lever" sentence now says how far the lever holds. Very large models skip ranging and say so.
+- **Single file**: Export → "Nadir as one file" (or the palette) downloads `nadir.html` with every CSS and JS file inlined. The worker still builds from the same source. `node tools/build.mjs [out]` produces the same file (default `dist/nadir.html`) using the same inliner (`js/app/build.js`).
+- **Installable offline app**: `sw.js` precaches every file (versioned cache, network-first for pages, cache-first for assets). Also added: `manifest.webmanifest` (with shortcuts), SVG icons, an "offline ready" toast, an update prompt that doesn't reload in the middle of editing, and a Settings → Offline & install panel (Install, Check for update, Download as one file). The service worker only runs on https or localhost; the single-file build and `file://` pages don't use it.
+- New settings: LP method, Presolve, Cutting planes, Sensitivity ranging.
+- Tests: 25/25 (new: LU residuals, revised vs dense on 60 random LPs, 3,000×3,000 sparse LP with a strong-duality check, textbook ranging for max and min, MIP v2 vs classic on 40 random models).
+
+## Known limits
+- The sparse LU uses Markowitz pivoting on a hash-map active submatrix. It is fine up to roughly 10⁴ rows. It is not a Forrest–Tomlin/HiGHS-class kernel, so very large (10⁵+) LPs are still slow in a browser.
+- Cuts are Gomory mixed-integer only (no knapsack cover or flow cover cuts). There is no dual simplex for re-optimising B&B nodes; child nodes are warm-started with the primal method.
+- Ranging applies to continuous LPs (Simplex engine); it is not available for MIP or NLP results.
+- Install buttons depend on the browser: iOS needs Share → Add to Home Screen.

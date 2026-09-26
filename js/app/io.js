@@ -41,24 +41,33 @@
     parts.push([[S.model.name], ['Status', r.status], ['Objective', r.objective]]);
     matrixBlocks().forEach((b) => parts.push(b));
     if (r.constraints && r.constraints.length) {
-      parts.push([['Rule', 'LHS', 'RHS', 'Slack', 'Binding', 'Shadow price'], ...r.constraints.map((c) => [c.label, c.lhs, c.rhs, c.slack, c.binding ? 'yes' : '', c.dual == null ? '' : c.dual])]);
+      const rg = r.constraints.some((c) => c.range);
+      parts.push([['Rule', 'LHS', 'RHS', 'Slack', 'Binding', 'Shadow price', ...(rg ? ['RHS allowable increase', 'RHS allowable decrease'] : [])], ...r.constraints.map((c) => [c.label, c.lhs, c.rhs, c.slack, c.binding ? 'yes' : '', c.dual == null ? '' : c.dual, ...(rg ? [rangeCell(c.range && c.range.inc), rangeCell(c.range && c.range.dec)] : [])])]);
+    }
+    if (r.costRanges) {
+      const rows = [['Decision', 'Value', 'Reduced cost', 'Cost allowable increase', 'Cost allowable decrease']];
+      r.layout.forEach((v) => { for (let i = 0; i < v.size; i++) { const j = v.offset + i; rows.push([E.elementName(v, i), r.values[j], r.reducedCosts ? r.reducedCosts[j] : '', rangeCell(r.costRanges[j].inc), rangeCell(r.costRanges[j].dec)]); } });
+      parts.push(rows);
     }
     const text = parts.map((b) => toTSV(b.map((row) => row.map((x) => (typeof x === 'number' ? fmt.plain(x) : x))))).join('\n\n');
     N.toast((await copyText(text)) ? 'Copied — paste into Excel' : 'Copy failed', { kind: 'ok' });
   }
 
+  function rangeCell(v) { return v == null ? '' : v === Infinity ? '1E+30' : fmt.plain(v); }
+
   function resultsCSV() {
     const r = S.result;
-    const rows = [['section', 'name', 'value', 'lower', 'upper', 'reduced_cost']];
-    rows.push(['status', r.status, '', '', '', '']);
-    rows.push(['objective', S.model.goal.expr, fmt.plain(r.objective), '', '', '']);
+    const rows = [['section', 'name', 'value', 'lower', 'upper', 'reduced_cost', 'allow_increase', 'allow_decrease']];
+    rows.push(['status', r.status, '', '', '', '', '', '']);
+    rows.push(['objective', S.model.goal.expr, fmt.plain(r.objective), '', '', '', '', '']);
     r.layout.forEach((v) => {
       for (let i = 0; i < v.size; i++) {
         const j = v.offset + i;
-        rows.push(['decision', E.elementName(v, i), fmt.plain(r.values[j]), fmt.plain(r.bounds.lower[j]), fmt.plain(r.bounds.upper[j]), r.reducedCosts ? fmt.plain(r.reducedCosts[j]) : '']);
+        const cr = r.costRanges && r.costRanges[j];
+        rows.push(['decision', E.elementName(v, i), fmt.plain(r.values[j]), fmt.plain(r.bounds.lower[j]), fmt.plain(r.bounds.upper[j]), r.reducedCosts ? fmt.plain(r.reducedCosts[j]) : '', cr ? rangeCell(cr.inc) : '', cr ? rangeCell(cr.dec) : '']);
       }
     });
-    (r.constraints || []).forEach((c) => rows.push(['rule', c.label, fmt.plain(c.lhs), c.op, fmt.plain(c.rhs), c.dual == null ? '' : fmt.plain(c.dual)]));
+    (r.constraints || []).forEach((c) => rows.push(['rule', c.label, fmt.plain(c.lhs), c.op, fmt.plain(c.rhs), c.dual == null ? '' : fmt.plain(c.dual), c.range ? rangeCell(c.range.inc) : '', c.range ? rangeCell(c.range.dec) : '']));
     return toCSV(rows);
   }
 
@@ -75,8 +84,13 @@
       L.push('| Decision | Value |', '|---|---:|');
       r.layout.forEach((v) => { for (let i = 0; i < v.size; i++) L.push(`| ${E.elementName(v, i)} | ${fmt(r.values[v.offset + i])} |`); });
       if (r.constraints && r.constraints.length) {
-        L.push('', '| Rule | LHS | RHS | Slack | Binding | Shadow |', '|---|---:|---:|---:|:-:|---:|');
-        r.constraints.forEach((c) => L.push(`| ${c.label} | ${fmt(c.lhs)} | ${fmt(c.rhs)} | ${fmt(c.slack)} | ${c.binding ? '●' : ''} | ${c.dual == null ? '' : fmt(c.dual)} |`));
+        const rg = r.constraints.some((c) => c.range);
+        L.push('', `| Rule | LHS | RHS | Slack | Binding | Shadow |${rg ? ' RHS range |' : ''}`, `|---|---:|---:|---:|:-:|---:|${rg ? '---:|' : ''}`);
+        r.constraints.forEach((c) => L.push(`| ${c.label} | ${fmt(c.lhs)} | ${fmt(c.rhs)} | ${fmt(c.slack)} | ${c.binding ? '●' : ''} | ${c.dual == null ? '' : fmt(c.dual)} |${rg ? ` ${c.range ? `${fmt(c.rhs - c.range.dec)} … ${fmt(c.rhs + c.range.inc)}` : ''} |` : ''}`));
+      }
+      if (r.costRanges) {
+        L.push('', '| Decision | Reduced cost | Cost +  | Cost − |', '|---|---:|---:|---:|');
+        r.layout.forEach((v) => { for (let i = 0; i < v.size; i++) { const j = v.offset + i; L.push(`| ${E.elementName(v, i)} | ${r.reducedCosts ? fmt(r.reducedCosts[j]) : ''} | ${fmt(r.costRanges[j].inc)} | ${fmt(r.costRanges[j].dec)} |`); } });
       }
     }
     L.push('', `_Exported from Nadir · ${new Date().toLocaleString()}_`);
@@ -93,7 +107,8 @@
       { icon: 'copy', title: 'Copy for Excel', sub: 'Tab-separated tables', need: true, run: copyForExcel },
       { icon: 'text', title: 'Markdown report', sub: 'Model and results', run: () => download(`${slug()}.md`, markdown(), 'text/markdown') },
       { icon: 'printer', title: 'Print report', sub: 'Or save as PDF', run: () => setTimeout(() => window.print(), 150) },
-      { icon: 'code', title: 'CPLEX .lp', sub: 'For Gurobi, CPLEX, HiGHS…', run: () => { const r = E.toLP(S.model, S.solverSettings()); if (r.error) { N.toast(r.error, { kind: 'bad' }); return false; } download(`${slug()}.lp`, r.text); } }
+      { icon: 'code', title: 'CPLEX .lp', sub: 'For Gurobi, CPLEX, HiGHS…', run: () => { const r = E.toLP(S.model, S.solverSettings()); if (r.error) { N.toast(r.error, { kind: 'bad' }); return false; } download(`${slug()}.lp`, r.text); } },
+      { icon: 'box', title: 'Nadir as one file', sub: N.Build && N.Build.isSingle() ? 'You are already using the single file' : 'nadir.html — the whole app, offline', run: () => { if (N.Build.isSingle()) { N.toast('This page is already the single-file build', { kind: 'info' }); return false; } N.Build.download(); } }
     ];
     const grid = h('div', { class: 'export-grid' });
     let dlg;

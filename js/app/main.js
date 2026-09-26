@@ -129,6 +129,10 @@
     act('Redo', 'redo', redo, { keys: 'Mod+Shift+Z' });
     act('Keyboard shortcuts', 'keyboard', shortcutSheet, { keys: '?' });
     act('Run test suite', 'flask', runTests);
+    act('Download Nadir as one file', 'box', () => N.Build.download(), { keywords: 'single html offline build portable' });
+    act('Install Nadir as an app', 'download', () => N.PWA.install(), { keywords: 'pwa offline install home screen' });
+    act('Check for update', 'restore', () => N.PWA.checkUpdate(), { keywords: 'version service worker' });
+    act('Show sensitivity ranges', 'sliders', () => { S.saveUI({ showAdvancedResults: true, showSensitivity: true }); S.emit('result'); }, { keywords: 'ranging allowable increase decrease shadow' });
     act('Take the guided tour', 'compass', () => N.Tour.start(), { keywords: 'help onboarding learn intro' });
     act('Language guide', 'book', () => N.Help.guide(), { keywords: 'help syntax docs' });
     act('Function reference', 'function', () => N.Help.guide('functions'), { keywords: 'help sum dot rowsum' });
@@ -244,6 +248,7 @@
     S.emit('model', { all: true });
     N.Live.flush();
     N.WorkerHost.warm();
+    N.PWA.register();
     window.addEventListener('beforeunload', () => S.flushSave());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') S.flushSave(); });
     const qs = new URLSearchParams(location.search);

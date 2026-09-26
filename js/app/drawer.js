@@ -328,7 +328,13 @@
         num('patience', 'DE patience', { step: '10', min: '10' }, 'Generations without progress'),
         num('seed', 'Seed', { step: '1' }, 'Makes random engines repeatable'),
         num('maxIter', 'Max iterations', { step: '1000', min: '100' }),
-        num('nodeLimit', 'Node limit', { step: '1000', min: '10' }))),
+        num('nodeLimit', 'Node limit', { step: '1000', min: '10' }),
+        h('div', { class: 'full' }, sel('lpMethod', 'LP method', [['auto', 'Auto — revised simplex with LU (scales to large sparse models)'], ['revised', 'Revised simplex (sparse LU, bounded)'], ['dense', 'Dense tableau (classic v1 engine)']], 'Revised is used for everything unless you pick Dense. Dense falls back automatically on numerical trouble.')))),
+      section('Integer models',
+        toggle('presolve', 'Presolve', 'Drop redundant rules, turn one-variable rules into bounds, tighten bounds and big-M coefficients before searching.'),
+        toggle('cuts', 'Cutting planes', 'Add Gomory mixed-integer cuts at the root to close the gap faster.')),
+      section('Sensitivity',
+        toggle('ranging', 'Sensitivity ranging', 'Compute allowable increase/decrease for every rule limit and goal weight after linear solves.')),
       section('Behaviour',
         toggle('nonNegative', 'Unbounded decisions are non-negative', 'Like Excel Solver. Type -inf as a lower bound to allow negatives.'),
         toggle('liveResolve', 'Live re-solve', 'Re-solve as sliders and given values change, when the last solve took under 150 ms.'),
@@ -339,9 +345,41 @@
       section('Display', h('div', { class: 'settings-grid' },
         h('div', { class: 'full' }, h('span', { class: 'field-label' }, 'Theme'), theme.el),
         h('label', null, h('span', { class: 'field-label' }, 'Decimals'), dec))),
+      section('Offline & install', pwaBox()),
       section('About', h('p', { class: 'field-hint', html: `Nadir runs entirely in this browser. Models are saved locally. Solves run in a ${N.WorkerHost.inWorker ? 'background worker' : 'fallback thread'}. <a href="?test" style="color:var(--accent-strong)">Run the test suite</a>.` }))
     );
     return wrap;
+  }
+
+  function pwaBox() {
+    const P = N.PWA;
+    const box = h('div', { class: 'pwa-box' });
+    const render = () => {
+      const st = P ? P.state : {};
+      const single = N.Build && N.Build.isSingle();
+      const status = single ? ['ok', 'Single-file build — this page already works offline'] : st.installed ? ['ok', 'Installed as an app'] : st.offlineReady ? ['ok', 'Ready to work offline'] : st.active ? ['info', 'Preparing offline copy…'] : ['muted', location.protocol === 'file:' ? 'Opened from a file — offline already' : 'Offline needs https or localhost'];
+      box.replaceChildren(h('div', { class: 'pwa-status' }, h('span', { class: 'pill pill-' + status[0] }, status[1]), st.version ? h('span', { class: 'faint' }, st.version) : null));
+      const row = h('div', { class: 'preset-row' });
+      if (!single && !st.installed) {
+        const b = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('download', 'icon-sm') + 'Install Nadir' });
+        b.addEventListener('click', () => P.install());
+        row.append(b);
+      }
+      if (st.active) {
+        const u = h('button', { class: 'btn btn-outline btn-sm', type: 'button', html: icon('restore', 'icon-sm') + 'Check for update' });
+        u.addEventListener('click', () => P.checkUpdate());
+        row.append(u);
+      }
+      if (!single) {
+        const one = h('button', { class: 'btn btn-outline btn-sm', type: 'button', html: icon('box', 'icon-sm') + 'Download as one file' });
+        one.addEventListener('click', () => N.Build.download());
+        row.append(one);
+      }
+      box.append(row, h('p', { class: 'field-hint' }, 'Everything already runs locally. Installing adds Nadir to your dock or home screen; the one-file build is a single nadir.html you can email or keep on a USB stick.'));
+    };
+    render();
+    if (P) { const off = P.on(() => { if (!box.isConnected) { off(); return; } render(); }); }
+    return box;
   }
 
   const PANELS = { library, templates, scenarios, sweep, settings };

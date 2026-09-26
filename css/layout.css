@@ -181,6 +181,16 @@
 .chart-tall { height: 210px; }
 .chart-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); margin-top: 6px; font-variant-numeric: tabular-nums; }
 
+.res-sensitivity .table-wrap { margin-top: 8px; }
+.res-sensitivity .table-wrap + .table-wrap { margin-top: 14px; }
+.res-sensitivity .field-hint { margin-top: 8px; }
+.sens-range { white-space: nowrap; }
+.sens-range span { display: inline-block; min-width: 44px; }
+.sens-range span:first-child { text-align: right; }
+.sens-range span:last-child { text-align: left; }
+.sens-range i { display: inline-block; width: 22px; height: 2px; margin: 0 6px 3px; border-radius: 1px; background: linear-gradient(90deg, var(--border-strong), var(--accent), var(--border-strong)); vertical-align: middle; }
+.pwa-box { display: flex; flex-direction: column; gap: 10px; }
+.pwa-status { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .res-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border); padding-top: 16px; }
 .diag-box { background: var(--warn-soft); border-radius: var(--r-lg); padding: 15px 17px; color: var(--text); font-size: 13px; border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); }
 .diag-box h4 { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 650; color: var(--warn); margin-bottom: 6px; }

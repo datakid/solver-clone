@@ -191,12 +191,12 @@
     },
     solverSettings() {
       const s = S.settings;
-      return { engine: s.engine, tol: +s.tol, timeLimit: +s.timeLimit, multistart: +s.multistart, gap: +s.gap, patience: +s.patience, maxIter: +s.maxIter, nodeLimit: +s.nodeLimit, seed: +s.seed, nonNegative: s.nonNegative !== false };
+      return { lpMethod: s.lpMethod || 'auto', presolve: s.presolve !== false, cuts: s.cuts !== false, ranging: s.ranging !== false, engine: s.engine, tol: +s.tol, timeLimit: +s.timeLimit, multistart: +s.multistart, gap: +s.gap, patience: +s.patience, maxIter: +s.maxIter, nodeLimit: +s.nodeLimit, seed: +s.seed, nonNegative: s.nonNegative !== false };
     },
 
     saveUI(patch) {
       Object.assign(S.ui, patch);
-      store(KEY_UI, { goalView: S.ui.goalView, givenCollapsed: S.ui.givenCollapsed, showAdvancedResults: S.ui.showAdvancedResults, toured: !!S.ui.toured, showChart: !!S.ui.showChart });
+      store(KEY_UI, { goalView: S.ui.goalView, givenCollapsed: S.ui.givenCollapsed, showAdvancedResults: S.ui.showAdvancedResults, toured: !!S.ui.toured, showChart: !!S.ui.showChart, showSensitivity: S.ui.showSensitivity !== false });
     },
 
     inLibrary(id) { return S.library.some((m) => m.id === (id || S.model.id)); },
