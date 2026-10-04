@@ -41,10 +41,13 @@
       { label: 'Light', icon: 'sun', run: () => setTheme('light') },
       { label: 'Dark', icon: 'moon', run: () => setTheme('dark') }
     ], { align: 'right' }), { id: 'theme-btn' });
+    const wizBtn = h('button', { class: 'btn btn-soft btn-sm header-wizard', type: 'button', id: 'wizard-btn', html: icon('sparkle', 'icon-sm') + '<span>Guided setup</span>', 'data-tip': 'Build a model by answering simple questions' });
+    wizBtn.addEventListener('click', () => N.Wizard.open());
     const actions = h('div', { class: 'header-actions' }, cmd,
       btn('undo', 'Undo', () => undo(), { keys: 'Mod+Z', cls: 'hide-sm' }),
+      wizBtn,
       btn('library', 'Library', () => N.Drawer.open('library')),
-      btn('share', 'Share link', () => N.IO.shareDialog(), { cls: 'hide-sm' }),
+      btn('share', 'Share link', () => N.IO.shareDialog(), { cls: 'hide-sm hide-md' }),
       btn('download', 'Export', () => N.IO.exportDialog(), { keys: 'Mod+Shift+E' }),
       btn('sliders', 'Settings', () => N.Drawer.open('settings'), { cls: 'hide-sm' }),
       themeBtn,
@@ -99,6 +102,7 @@
     const A = [];
     const act = (label, ic, run, extra) => A.push(Object.assign({ group: 'Actions', label, icon: ic, run }, extra || {}));
     act('Solve', 'play', () => N.Solve.run(), { keys: 'Mod+Enter', boost: 10 });
+    act('Guided setup (no math)', 'sparkle', () => N.Wizard.open(), { keywords: 'wizard simple questions beginner start', boost: 6 });
     act('New model', 'newFile', newModel);
     act('Save to library', 'bookmark', save, { keys: 'Mod+S' });
     act('Add rule', 'plus', () => N.App.rules.add(), { keys: 'Alt+N' });
@@ -252,14 +256,15 @@
     window.addEventListener('beforeunload', () => S.flushSave());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') S.flushSave(); });
     const qs = new URLSearchParams(location.search);
-    if (qs.get('template')) { N.Templates.open(qs.get('template')); N.Live.flush(); }
+    if (qs.get('template')) { N.Templates.open(qs.get('template'), { quiet: qs.has('solve') }); N.Live.flush(); }
     if (qs.has('text')) goal.setView('text');
     if (qs.has('solve')) setTimeout(() => N.Solve.run(), 50);
     if (qs.has('theme')) setTheme(qs.get('theme'));
     if (qs.has('tour')) setTimeout(() => N.Tour.start(), 120);
     if (qs.has('guide')) N.Help.guide(qs.get('guide') || undefined);
+    if (qs.has('wizard')) setTimeout(() => N.Wizard.open(qs.get('wizard') || undefined), 60);
     if (qs.has('test')) runTests();
-    else if (!qs.has('tour') && !S.model.variables.length && E.isBlank(S.model.goal.expr) && !S.library.length && window.matchMedia('(min-width: 961px)').matches) goal.focus();
+    else if (!qs.has('tour') && !S.model.variables.length && E.isBlank(S.model.goal.expr) && !S.library.length && window.matchMedia('(min-width: 1101px)').matches) goal.focus();
     document.body.classList.add('is-ready');
   }
 

@@ -49,7 +49,8 @@
 
   function createField(opts) {
     const o = opts || {};
-    const wrap = h('div', { class: 'code' + (o.size === 'lg' ? ' code-lg' : '') + (o.className ? ' ' + o.className : '') });
+    const wrap = h('div', { class: 'code' + (o.size === 'lg' ? ' code-lg' : '') + (o.className ? ' ' + o.className : '') + (o.assist ? ' has-assist' : '') });
+    const box = h('div', { class: 'code-box' });
     const mirror = h('div', { class: 'code-hl', 'aria-hidden': 'true' });
     const inner = h('span', { class: 'code-hl-inner' });
     mirror.append(inner);
@@ -59,7 +60,14 @@
     });
     if (o.id) input.id = o.id;
     if (o.dataField) input.dataset.field = o.dataField;
-    wrap.append(mirror, input);
+    box.append(mirror, input);
+    wrap.append(box);
+    let assistEl = null;
+    if (o.assist) {
+      assistEl = h('div', { class: 'assist', hidden: true, role: 'toolbar', 'aria-label': 'Insert' });
+      assistEl.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+      wrap.append(assistEl);
+    }
     let err = null;
     const paint = () => {
       inner.innerHTML = highlightHTML(input.value, err, o.kind === 'rule') + '&#8203;';
@@ -75,8 +83,8 @@
     input.addEventListener('scroll', sync);
     input.addEventListener('keyup', sync);
     input.addEventListener('select', sync);
-    input.addEventListener('focus', () => wrap.classList.add('is-focus'));
-    input.addEventListener('blur', () => { wrap.classList.remove('is-focus'); setTimeout(() => autocomplete.closeIf(api), 120); if (o.onBlur) o.onBlur(input.value); });
+    input.addEventListener('focus', () => { wrap.classList.add('is-focus'); if (assistEl) { renderAssist(api, assistEl, o.assist); assistEl.hidden = false; } });
+    input.addEventListener('blur', () => { wrap.classList.remove('is-focus'); if (assistEl) setTimeout(() => { if (document.activeElement !== input) assistEl.hidden = true; }, 80); setTimeout(() => autocomplete.closeIf(api), 120); if (o.onBlur) o.onBlur(input.value); });
     input.addEventListener('keydown', (e) => {
       if (autocomplete.key(api, e)) return;
       if (o.onKey) o.onKey(e, api);
@@ -84,7 +92,7 @@
     input.addEventListener('click', () => autocomplete.closeIf(api));
 
     const api = {
-      el: wrap, input,
+      el: wrap, input, box,
       get value() { return input.value; },
       setValue(v) {
         if (document.activeElement === input) return;
@@ -183,7 +191,7 @@
     }
     function place() {
       if (!pop || !owner) return;
-      const r = owner.el.getBoundingClientRect();
+      const r = (owner.box || owner.el).getBoundingClientRect();
       const w = pop.offsetWidth;
       let x = r.left, y = r.bottom + 4;
       const ht = pop.offsetHeight;
@@ -220,20 +228,95 @@
     return { update, key, close, closeIf, get open() { return !!pop; } };
   })();
 
-  function errorLine() {
+  function friendly(msg) {
+    return String(msg)
+      .replace(/^Unknown name '([^']+)'\. Did you mean '([^']+)'\?$/, "Nadir doesn't know '$1' yet. Did you mean '$2'?")
+      .replace(/^Unknown name '([^']+)'$/, "Nadir doesn't know '$1' yet — add it as a number or a decision")
+      .replace(/^A rule needs a comparison such as <=, >= or =$/, 'A limit needs a comparison — ≤ (at most), ≥ (at least) or = (exactly)')
+      .replace(/^Missing operator before '([^']+)'$/, "Something's missing before '$1' — try + or ×")
+      .replace(/^Expression ends too early$/, 'This looks unfinished')
+      .replace(/^Sizes don't match/, "The lists here have different lengths");
+  }
+
+  function fixButtons(e, field, opts) {
+    const f = e.fix;
+    const o = opts || {};
+    const out = [];
+    if (!f || !field) return out;
+    const btn = (label, run, kind) => {
+      const b = h('button', { class: 'fix-btn' + (kind ? ' ' + kind : ''), type: 'button', html: label });
+      b.addEventListener('mousedown', (ev) => ev.preventDefault());
+      b.addEventListener('click', run);
+      out.push(b);
+    };
+    if (f.kind === 'unknown') {
+      if (f.suggest) btn(icon('check', 'icon-xs') + `Use <b class="mono">${esc(f.suggest)}</b>`, () => field.insert(f.suggest, e.start, e.end), 'is-primary');
+      if (N.QuickFix) {
+        btn(icon('plus', 'icon-xs') + `Add <b class="mono">${esc(f.name)}</b> as a number`, () => N.QuickFix.addNumber(f.name));
+        if (o.vars) btn(icon('plus', 'icon-xs') + `as a decision`, () => N.QuickFix.addDecision(f.name));
+      }
+    } else if (f.kind === 'compare') {
+      [['<=', '≤ at most'], ['>=', '≥ at least'], ['=', '= exactly']].forEach(([op, t]) => btn(esc(t), () => { const L = field.input.value.replace(/\s+$/, '').length; field.insert(' ' + op + ' ', L, field.input.value.length); }));
+    }
+    return out;
+  }
+
+  function errorLine(field, opts) {
     const el = h('div', { class: 'field-error', hidden: true, role: 'alert' });
     return {
       el,
       set(e) {
-        if (!e) { if (!el.hidden) { el.hidden = true; el.textContent = ''; } return; }
+        if (!e) { if (!el.hidden) { el.hidden = true; el.textContent = ''; el.dataset.msg = ''; } return; }
         const msg = e.message;
-        if (el.dataset.msg === msg && !el.hidden) return;
-        el.dataset.msg = msg;
-        el.innerHTML = icon('alert') + `<span>${esc(msg)}</span>`;
+        const key = msg + '|' + e.start + '|' + e.end;
+        if (el.dataset.msg === key && !el.hidden) return;
+        el.dataset.msg = key;
+        el.innerHTML = icon('alert') + `<span class="field-error-msg">${esc(friendly(msg))}</span>`;
+        const fx = fixButtons(e, field, opts);
+        if (fx.length) el.append(h('span', { class: 'fix-row' }, fx));
         el.hidden = false;
       }
     };
   }
 
-  N.Field = { create: createField, errorLine, setSymbols: fieldSymbols, autocomplete, highlightHTML };
+  function renderAssist(field, el, mode) {
+    const sym = symbols();
+    el.textContent = '';
+    const chip = (label, text, cls, tip) => {
+      const b = h('button', { class: 'assist-chip' + (cls ? ' ' + cls : ''), type: 'button', 'data-tip': tip || null, html: label });
+      b.addEventListener('click', () => insertSmart(field, text));
+      return b;
+    };
+    const names = h('div', { class: 'assist-group' });
+    const vs = sym.vars.slice(0, 10), ps = sym.params.slice(0, 14);
+    vs.forEach((v) => names.append(chip(esc(v.name), v.name, 'is-var', 'Decision · ' + (v.desc || ''))));
+    ps.forEach((p) => names.append(chip(esc(p.name), p.name, 'is-param', 'Number · ' + (p.desc || ''))));
+    if (!vs.length && !ps.length) names.append(h('span', { class: 'assist-empty' }, 'Names you add in Decisions and Numbers show up here'));
+    const ops = h('div', { class: 'assist-group assist-ops' });
+    if (mode === 'rule') {
+      ops.append(chip('≤ <span>at most</span>', '<=', 'is-cmp'), chip('≥ <span>at least</span>', '>=', 'is-cmp'), chip('= <span>exactly</span>', '=', 'is-cmp'));
+    }
+    ops.append(chip('+', '+', 'is-op'), chip('−', '-', 'is-op'), chip('×', '*', 'is-op'), chip('÷', '/', 'is-op'), chip('total of…', 'sum(', 'is-fn', 'sum(list) adds up every element'));
+    el.append(names, ops);
+  }
+
+  function insertSmart(field, text) {
+    const input = field.input;
+    const v = input.value;
+    const a = input.selectionStart == null ? v.length : input.selectionStart;
+    const b = input.selectionEnd == null ? a : input.selectionEnd;
+    const prev = v.slice(0, a).replace(/\s+$/, '');
+    const isWord = /^[A-Za-z_]/.test(text);
+    const isOp = !isWord && text !== 'sum(';
+    let ins;
+    if (text === 'sum(') { ins = (prev && !/[(\s]$/.test(v.slice(0, a)) ? ' ' : '') + 'sum()'; }
+    else if (isOp) ins = (prev.length === a ? ' ' : '') + text + ' ';
+    else {
+      const needOp = /[A-Za-z0-9_)\]]$/.test(prev);
+      ins = (needOp ? (prev.length === a ? ' * ' : '* ') : (prev && prev.length === a && !/[(\[]$/.test(prev) ? ' ' : '')) + text;
+    }
+    field.insert(ins, a, b, text === 'sum(' ? 1 : 0);
+  }
+
+  N.Field = { create: createField, errorLine, setSymbols: fieldSymbols, autocomplete, highlightHTML, friendly };
 })(window.Nadir);

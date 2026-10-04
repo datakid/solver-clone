@@ -112,6 +112,7 @@
 
   function menu(anchor) {
     return O.menu(anchor, [
+      { label: 'Guided setup', icon: 'sparkle', run: () => N.Wizard.open() },
       { label: 'Take the tour', icon: 'compass', run: () => N.Tour.start() },
       { label: 'Language guide', icon: 'book', run: () => guide() },
       { label: 'Function reference', icon: 'function', run: () => guide('functions') },

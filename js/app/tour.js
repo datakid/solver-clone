@@ -5,13 +5,13 @@
   const O = N.Overlays;
 
   const STEPS = [
-    { sel: '#goal-card', title: 'Start with a goal', text: 'Say what you want <strong>as big</strong> (profit, reach) or <strong>as small</strong> (cost, time) as possible. Use the names you define below — the line underneath repeats it back in plain words.' },
-    { sel: '#decide-card', title: 'Decide what can change', text: 'These are the numbers Nadir chooses for you. Pick <strong>1.5</strong> for any number, <strong>1, 2</strong> for whole numbers, or <strong>Y/N</strong> for yes/no choices, and give each an allowed range.' },
-    { sel: '#rules-card', title: 'Add the rules', text: 'Limits the answer must respect — like <span class="mono">oven time ≤ 60</span>. The pill on the right checks each rule live: <span class="tour-pill ok">slack</span> means there is room to spare, <span class="tour-pill info">binding</span> means it is right at the limit.' },
-    { sel: '#given-card', title: 'Name your numbers', text: 'Put prices, costs and capacities here, so rules read like sentences. Paste a table straight from Excel, or turn a number into a <strong>slider</strong> to play “what if”.' },
+    { sel: '#goal-card', title: '1 · The goal', text: 'What should be <strong>as big</strong> (profit, reach) or <strong>as small</strong> (cost, time) as possible? Click into the box and tap the names below it — no need to remember syntax. Nadir reads it back in plain words.' },
+    { sel: '#decide-card', title: '2 · Decisions', text: 'The numbers Nadir chooses for you. <strong>2.5</strong> = any amount, <strong>1 2 3</strong> = whole numbers, <strong>Y/N</strong> = yes or no. Give each a lowest and highest allowed value.' },
+    { sel: '#rules-card', title: '3 · Limits', text: 'What the answer must respect — like <span class="mono">oven time ≤ 60</span>. The tag on the right checks each one: <span class="tour-pill ok">5 to spare</span> or <span class="tour-pill info">at the limit</span>.' },
+    { sel: '#given-card', title: '4 · Numbers', text: 'Prices, costs and stock live here, so limits read like sentences. Paste a table from Excel, or turn a number into a <strong>slider</strong> to try “what if”.' },
     { sel: '#solve-button', title: 'Solve', text: `Press the button or ${keys('Mod+Enter')}. Nadir looks at your model and picks the right method automatically — linear, integer or nonlinear.`, pad: 6 },
     { sel: '#results-col', title: 'Read the answer', text: 'You get the best value, every decision, and a short <strong>In plain words</strong> summary: what to do, what holds you back, and which limit is worth loosening first.', sheet: true },
-    { sel: '#help-btn', title: 'Help is always here', text: `The <strong>Language guide</strong> lists every function with examples. Press ${keys('Mod+K')} to search every action, and <span class="kbd">?</span> for shortcuts.`, pad: 4 }
+    { sel: '#wizard-btn', title: 'Stuck? Use guided setup', text: `Answer a few questions and fill in a small table — Nadir writes the whole model for you. Press ${keys('Mod+K')} to search every action.`, pad: 4 }
   ];
 
   let st = null;

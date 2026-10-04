@@ -220,7 +220,9 @@ NadirEngine.define('syntax', function (E) {
     const node = P.expr(0);
     P.done();
     if (node.type !== 'Compare' || node.paren) {
-      throw new NadirError('A rule needs a comparison such as <=, >= or =', node.start, node.end);
+      const ce = new NadirError('A rule needs a comparison such as <=, >= or =', node.start, node.end);
+      ce.fix = { kind: 'compare' };
+      throw ce;
     }
     return { label, node };
   }

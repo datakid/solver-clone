@@ -1,13 +1,13 @@
-const VERSION = 'nadir-v2.1.0';
+const VERSION = 'nadir-v3.0.0';
 const CORE = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'icons/icon.svg',
-  'icons/icon-maskable.svg',
+  'images/nadir-icon.png',
   'css/base.css',
   'css/components.css',
   'css/layout.css',
+  'css/polish.css',
   'js/engine/core.js',
   'js/engine/syntax.js',
   'js/engine/ir.js',
@@ -20,6 +20,7 @@ const CORE = [
   'js/engine/solve.js',
   'js/engine/text.js',
   'js/engine/explain.js',
+  'js/engine/guide.js',
   'js/engine/tests.js',
   'js/app/util.js',
   'js/app/store.js',
@@ -33,6 +34,7 @@ const CORE = [
   'js/app/results.js',
   'js/app/solve.js',
   'js/app/templates.js',
+  'js/app/wizard.js',
   'js/app/io.js',
   'js/app/drawer.js',
   'js/app/tour.js',

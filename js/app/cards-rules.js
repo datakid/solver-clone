@@ -7,9 +7,9 @@
   const { shell, flash, editField, commitOnBlur } = N.Cards;
 
   function RulesCard() {
-    const c = shell('rules-card', 'Subject to', { foot: true, step: 3, sub: 'Limits the answer must respect — budgets, capacities, minimums.' });
+    const c = shell('rules-card', 'Limits', { foot: true, step: 3, sub: 'What the answer must respect — budgets, capacities, minimums.' });
     const list = h('div', { class: 'rows', role: 'list', 'aria-label': 'Rules' });
-    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Rule</span>' + keys('Alt+N') });
+    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Add a limit</span>' + keys('Alt+N') });
     add.addEventListener('click', () => addRule());
     const ideas = h('div', { class: 'rule-ideas', hidden: true });
     c.body.append(list, add, ideas);
@@ -20,11 +20,11 @@
       if (!show) return;
       const a = vars[0], b = vars[1];
       const sum = vars.length > 1 ? `${a} + ${b}` : (S.compiled && S.compiled.vars[0] && S.compiled.vars[0].size > 1 ? `sum(${a})` : a);
-      const sugg = [[`${sum} <= 100`, 'a total cap'], [`${a} >= 10`, 'a minimum']];
-      if (b) sugg.push([`${a} <= 2 * ${b}`, 'a ratio']);
-      ideas.replaceChildren(h('span', { class: 'faint' }, 'Try:'));
-      sugg.forEach(([ex, why]) => {
-        const bt = h('button', { class: 'idea-chip', type: 'button', 'data-tip': 'Add ' + why, html: `<span class="mono">${esc(ex)}</span>` });
+      const sugg = [[`${sum} <= 100`, 'Total cap', 'no more than 100 in total'], [`${a} >= 10`, 'Minimum', `at least 10 ${a}`]];
+      if (b) sugg.push([`${a} <= 2 * ${b}`, 'Ratio', `${a} at most twice ${b}`]);
+      ideas.replaceChildren(h('span', { class: 'idea-lead' }, 'Common limits — click one, then change the numbers:'));
+      sugg.forEach(([ex, why, say]) => {
+        const bt = h('button', { class: 'idea-chip', type: 'button', 'data-tip': say, html: `<strong>${esc(why)}</strong><span class="mono">${esc(ex)}</span>` });
         bt.addEventListener('click', () => addRule(null, ex));
         ideas.append(bt);
       });
@@ -36,9 +36,9 @@
       const el = h('div', { class: 'row rule-row', role: 'listitem', dataset: { id: item.id } });
       const grip = h('button', { class: 'grip', type: 'button', 'aria-label': 'Drag to reorder (or use arrow keys)', html: icon('grip', 'icon-sm') });
       const sw = switchEl(item.enabled !== false, (v) => { S.edit(() => { cur.enabled = v; }, { undo: true }); el.classList.toggle('is-disabled', !v); }, 'Rule enabled');
-      const label = textInput({ className: 'input-bare rule-label', value: item.label, placeholder: 'Label', aria: 'Rule label', field: 'label', onInput: (v) => { S.beginEdit(); cur.label = v; S.edit(null, { field: 'label' }); } });
+      const label = textInput({ className: 'input-bare rule-label', value: item.label, placeholder: 'Name it', aria: 'Limit name', field: 'label', onInput: (v) => { S.beginEdit(); cur.label = v; S.edit(null, { field: 'label' }); } });
       const expr = N.Field.create({
-        kind: 'rule', placeholder: 'e.g. sum(wood * make) <= woodStock', ariaLabel: 'Rule', value: item.expr, dataField: 'expr',
+        kind: 'rule', assist: 'rule', placeholder: 'e.g. 2 * chairs + 5 * tables <= 100', ariaLabel: 'Limit', value: item.expr, dataField: 'expr',
         onInput: editField(get, 'expr'),
         onKey: (e) => {
           if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
@@ -60,9 +60,8 @@
       const pill = h('span', { class: 'pill pill-muted', 'aria-live': 'off' }, '—');
       const del = h('button', { class: 'btn btn-ghost btn-icon btn-sm row-del', type: 'button', 'aria-label': 'Remove rule', html: icon('trash', 'icon-sm') });
       del.addEventListener('click', () => removeRule(cur.id));
-      const errl = N.Field.errorLine();
-      errl.el.classList.add('row-sub');
-      errl.el.style.paddingLeft = '206px';
+      const errl = N.Field.errorLine(expr, { vars: true });
+      errl.el.classList.add('row-sub', 'rule-err');
       const meta = h('div', { class: 'rule-meta row-sub' });
       const says = h('div', { class: 'plain-line rule-says row-sub', hidden: true });
       el.append(grip, sw.el, label.el, expr.el, pill, del, errl.el, says, meta);
@@ -79,21 +78,21 @@
           says.hidden = !phrase;
           if (phrase && says.dataset.t !== phrase) { says.dataset.t = phrase; says.textContent = phrase; }
           let cls = 'pill pill-muted', html = '—', tip = '';
-          if (err) { cls = 'pill pill-bad'; html = icon('x') + 'error'; }
+          if (err) { cls = 'pill pill-bad'; html = icon('x') + 'fix me'; }
           else if (E.isBlank(cur.expr)) { cls = 'pill pill-muted'; html = 'empty'; }
-          else if (cur.enabled === false) { cls = 'pill pill-muted'; html = 'off'; }
+          else if (cur.enabled === false) { cls = 'pill pill-muted'; html = 'paused'; }
           else if (st) {
             if (st.scalar > 1) {
-              if (st.off) { cls = 'pill pill-bad'; html = icon('x') + `${fmt(st.off)} of ${fmt(st.count)} off`; tip = `Worst miss ${fmt(st.worst)}`; }
-              else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + `${fmt(st.count)}/${fmt(st.count)} ok`; tip = `${fmt(st.binding)} binding — exactly at the limit`; }
-              else { cls = 'pill pill-ok'; html = icon('check') + `${fmt(st.count)}/${fmt(st.count)} ok`; tip = `Min slack ${fmt(st.slack)}`; }
-            } else if (st.off) { cls = 'pill pill-bad'; html = icon('x') + `off by ${fmt(st.worst)}`; tip = 'Not met'; }
-            else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + 'binding'; tip = 'Exactly at the limit'; }
-            else { cls = 'pill pill-ok'; html = icon('check') + `slack ${fmt(st.slack)}`; tip = `Met, with ${fmt(st.slack)} to spare`; }
+              if (st.off) { cls = 'pill pill-bad'; html = icon('x') + `${fmt(st.off)} of ${fmt(st.count)} broken`; tip = `Worst one is missed by ${fmt(st.worst)}`; }
+              else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + `all ${fmt(st.count)} ok`; tip = `${fmt(st.binding)} exactly at the limit`; }
+              else { cls = 'pill pill-ok'; html = icon('check') + `all ${fmt(st.count)} ok`; tip = `Smallest room left: ${fmt(st.slack)}`; }
+            } else if (st.off) { cls = 'pill pill-bad'; html = icon('x') + `broken by ${fmt(st.worst)}`; tip = 'Not met'; }
+            else if (st.binding) { cls = 'pill pill-info'; html = icon('dot') + 'at the limit'; tip = 'Exactly at the limit'; }
+            else { cls = 'pill pill-ok'; html = icon('check') + `${fmt(st.slack)} to spare`; tip = `Met, with ${fmt(st.slack)} of room left`; }
           }
           const key = cls + html;
           if (key !== pillKey) { pill.className = cls; pill.innerHTML = html; pillKey = key; }
-          if (tip) pill.dataset.tip = tip + ' at current values'; else delete pill.dataset.tip;
+          if (tip) pill.dataset.tip = tip + ' — checked with today’s starting values, before solving'; else delete pill.dataset.tip;
           const parts = [];
           if (st && !err && st.count > 1) parts.push(`expands to ${fmt(st.count)}`);
           if (nonlinear && !err) parts.push('nonlinear');
@@ -137,13 +136,13 @@
       }
       const n = S.model.constraints.length;
       let t;
-      if (!n) t = 'No rules yet — only the allowed ranges limit the answer';
+      if (!n) t = 'No limits yet — only the allowed ranges in Decisions hold the answer back';
       else {
-        const parts = [`${n} ${n === 1 ? 'rule' : 'rules'}`];
-        if (scalar !== enabled) parts.push(`${fmt(scalar)} scalar`);
+        const parts = [`${n} ${n === 1 ? 'limit' : 'limits'}`];
+        if (scalar !== enabled) parts.push(`${fmt(scalar)} checks in total`);
         if (errs) parts.push(`${errs} to fix`);
-        else if (off) parts.push(`${off} not met at current values`);
-        else if (enabled) parts.push('all satisfied at current values');
+        else if (off) parts.push(`${off} broken by the starting values — that’s fine, Solve fixes it`);
+        else if (enabled) parts.push('the starting values already respect them');
         t = parts.join(' · ');
       }
       if (c.foot.textContent !== t) c.foot.textContent = t;
@@ -160,12 +159,12 @@
   }
 
   function GivenCard() {
-    const c = shell('given-card', 'Given', { foot: true, step: 4, sub: 'Fixed numbers and data — prices, costs, capacities. Paste from Excel.' });
+    const c = shell('given-card', 'Numbers', { foot: true, step: 4, sub: 'Facts that don’t change — prices, costs, stock. Name them once, use them anywhere. Paste from Excel.' });
     const collapse = h('button', { class: 'btn btn-ghost btn-icon btn-sm collapse-btn', type: 'button', 'aria-label': 'Collapse', 'aria-expanded': 'true', html: icon('chevronDown', 'icon-sm') });
     const paste = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'data-tip': 'Paste a table from Excel', html: icon('table', 'icon-sm') + '<span>Paste table</span>' });
     c.actions.append(paste, collapse);
     const list = h('div', { class: 'rows', role: 'list', 'aria-label': 'Given values' });
-    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Value</span>' });
+    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Add a number</span>' });
     add.addEventListener('click', () => addParam());
     c.body.append(list, add);
     paste.addEventListener('click', () => N.IO.pasteDialog(''));
@@ -191,11 +190,11 @@
       const get = () => cur;
       const el = h('div', { class: 'row param-row', role: 'listitem', dataset: { id: item.id } });
       const grip = h('button', { class: 'grip', type: 'button', 'aria-label': 'Drag to reorder (or use arrow keys)', html: icon('grip', 'icon-sm') });
-      const name = textInput({ className: 'input-mono name-input', value: item.name, placeholder: 'name', aria: 'Value name', field: 'name', onInput: (v) => { S.beginEdit(); cur.name = v; S.edit(null, { field: 'name' }); } });
-      const expr = N.Field.create({ placeholder: 'e.g. [45, 80, 60]', ariaLabel: 'Value', noVars: true, value: item.expr, onInput: (v) => { S.beginEdit(); cur.expr = v; S.edit(null, { field: 'expr', param: true }); syncSliderValue(); },
+      const name = textInput({ className: 'input-mono name-input', value: item.name, placeholder: 'e.g. price', aria: 'Number name', field: 'name', onInput: (v) => { S.beginEdit(); cur.name = v; S.edit(null, { field: 'name' }); } });
+      const expr = N.Field.create({ placeholder: 'e.g. 45  or a list [45, 80, 60]', ariaLabel: 'Value', noVars: true, value: item.expr, onInput: (v) => { S.beginEdit(); cur.expr = v; S.edit(null, { field: 'expr', param: true }); syncSliderValue(); },
         onKey: (e) => { if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); const last = S.model.parameters[S.model.parameters.length - 1]; if (last && last.id === cur.id) addParam(); else rows.get(S.model.parameters[S.model.parameters.findIndex((p) => p.id === cur.id) + 1].id).focus(); } } });
       const shapeTxt = h('span', { class: 'param-shape' });
-      const sliderBtn = h('button', { class: 'btn btn-ghost btn-icon btn-sm', type: 'button', 'aria-label': 'Slider', 'aria-pressed': String(!!item.slider), 'data-tip': 'Slider', html: icon('toggle', 'icon-sm') });
+      const sliderBtn = h('button', { class: 'btn btn-ghost btn-icon btn-sm', type: 'button', 'aria-label': 'Slider', 'aria-pressed': String(!!item.slider), 'data-tip': 'Turn into a slider to try “what if”', html: icon('toggle', 'icon-sm') });
       const del = h('button', { class: 'btn btn-ghost btn-icon btn-sm row-del', type: 'button', 'aria-label': 'Remove value', html: icon('trash', 'icon-sm') });
       del.addEventListener('click', () => removeParam(cur.id));
       const errl = N.Field.errorLine();
@@ -283,11 +282,17 @@
       const used = new Set([...S.model.variables.map((v) => v.name), ...S.model.parameters.map((p) => p.name)]);
       let k = 1; while (used.has('p' + k)) k++; return 'p' + k;
     }
-    function addParam(p) {
-      const it = Object.assign({ id: E.uid('p'), name: nextName(), expr: '', slider: null }, p || {});
+    function addParam(p, opts) {
+      const o = opts || {};
+      const it = Object.assign({ id: E.uid('p'), name: nextName(), expr: '', slider: null }, p && typeof p === 'object' && !p.nodeType && !p.type ? p : {});
       S.edit((m) => m.parameters.push(it), { structural: true });
       setCollapsed(false, false);
-      requestAnimationFrame(() => { const r = rows.get(it.id); if (r) { if (p) r.flash(); else r.focusName(); } });
+      requestAnimationFrame(() => {
+        const r = rows.get(it.id);
+        if (!r) return;
+        if (o.focusValue) { r.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); r.flash(); setTimeout(() => r.focus(), 260); }
+        else if (p && typeof p === 'object' && p.name) r.flash(); else r.focusName();
+      });
       return it;
     }
     function removeParam(id, focusPrev) {
@@ -324,7 +329,7 @@
       const parts = n ? [`${n} ${n === 1 ? 'value' : 'values'}`] : [];
       if (cells) parts.push(`${fmt(cells)} table cells`);
       if (errs) parts.push(`${errs} to fix`);
-      const t = n ? parts.join(' · ') : 'Name your numbers here so rules read like sentences';
+      const t = n ? parts.join(' · ') : 'Example: price = 45. Then write price in the goal instead of 45.';
       if (c.foot.textContent !== t) c.foot.textContent = t;
     }
     S.on('structure', sync);

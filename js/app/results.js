@@ -61,16 +61,27 @@
   }
 
   const STATUS = {
-    optimal: { word: 'Optimal', cls: 'st-optimal', say: 'Best possible answer' },
-    feasible: { word: 'Feasible', cls: 'st-feasible', say: 'A good answer — maybe not the very best' },
-    infeasible: { word: 'Infeasible', cls: 'st-infeasible', say: 'The rules contradict each other' },
-    unbounded: { word: 'Unbounded', cls: 'st-unbounded', say: 'Nothing stops the goal' },
-    stopped: { word: 'Stopped', cls: 'st-stopped', say: 'Stopped early' },
-    error: { word: 'Error', cls: 'st-error', say: 'Could not solve' },
-    running: { word: 'Solving', cls: 'st-running', say: 'Searching…' }
+    optimal: { word: 'Best answer', cls: 'st-optimal', say: 'Nothing beats this', tech: 'Optimal' },
+    feasible: { word: 'Good answer', cls: 'st-feasible', say: 'Fits every limit — maybe not the very best', tech: 'Feasible' },
+    infeasible: { word: 'No answer fits', cls: 'st-infeasible', say: 'Some limits clash', tech: 'Infeasible' },
+    unbounded: { word: 'No ceiling', cls: 'st-unbounded', say: 'Something can grow forever', tech: 'Unbounded' },
+    stopped: { word: 'Stopped', cls: 'st-stopped', say: 'Stopped early', tech: 'Stopped' },
+    error: { word: 'Not ready', cls: 'st-error', say: 'Something needs fixing', tech: 'Error' },
+    running: { word: 'Solving', cls: 'st-running', say: 'Searching…', tech: 'Running' }
   };
 
   const TEMPLATE_ICON = (t) => t.icon || 'layers';
+
+  function niceUp(x) {
+    if (!Number.isFinite(x) || x <= 0) return x;
+    if (Math.abs(x - Math.round(x)) < 1e-7) return Math.round(x);
+    const p = Math.pow(10, Math.floor(Math.log10(x)) - 2);
+    return +(Math.ceil(x / p - 1e-9) * p).toPrecision(6);
+  }
+  function canPatch(expr) {
+    if (!expr || expr.includes('#')) return false;
+    try { const p = E.parseRule(expr); return p && p.node.ops.length === 1; } catch (e) { return false; }
+  }
 
   function ResultsPanel(root) {
     const card = h('section', { class: 'card', id: 'results-card', 'aria-label': 'Results', 'aria-live': 'polite' });
@@ -84,19 +95,18 @@
     function welcome() {
       const box = h('div', { class: 'res-empty res-welcome' });
       box.innerHTML = `<div class="welcome-art">${VALLEY}</div>` +
-        `<h3>Find the best decision</h3>` +
-        `<p>Tell Nadir what you want, what you can change and what limits you. It works out the best answer — right here in your browser.</p>`;
-      const steps = h('ol', { class: 'welcome-steps' });
-      [['target', 'Goal', 'What do you want more or less of?'], ['sliders', 'Decide', 'Which numbers can you choose?'], ['scale', 'Subject to', 'What rules must the answer follow?']].forEach(([ic, t, d], i) => {
-        steps.append(h('li', { html: `<span class="welcome-step-n">${i + 1}</span><span class="welcome-step-ic">${icon(ic, 'icon-sm')}</span><span><strong>${esc(t)}</strong><span>${esc(d)}</span></span>` }));
-      });
+        `<h3>Find the best decision — no math needed</h3>` +
+        `<p>How many to make, where to spend, who does what. Describe your situation and Nadir works out the best plan, then explains it in plain words.</p>`;
+      const hero = h('button', { class: 'welcome-wizard', type: 'button', id: 'welcome-wizard' });
+      hero.innerHTML = `<span class="welcome-wizard-ic">${icon('sparkle')}</span><span class="welcome-wizard-txt"><strong>Set up with simple questions</strong><span>Pick a situation, fill in a small table — Nadir writes the model for you.</span></span>${icon('arrowRight', 'icon-sm')}`;
+      hero.addEventListener('click', () => N.Wizard.open());
       const ctas = h('div', { class: 'welcome-ctas' });
-      const tour = h('button', { class: 'btn btn-primary', type: 'button', html: icon('compass', 'icon-sm') + 'Take the 1-minute tour' });
+      const tour = h('button', { class: 'btn btn-outline btn-sm', type: 'button', html: icon('compass', 'icon-sm') + 'Show me around (1 min)' });
       tour.addEventListener('click', () => N.Tour.start());
-      const guide = h('button', { class: 'btn btn-outline', type: 'button', html: icon('book', 'icon-sm') + 'Language guide' });
-      guide.addEventListener('click', () => N.Help.guide());
-      ctas.append(tour, guide);
-      box.append(steps, ctas, h('div', { class: 'welcome-divider' }, h('span', null, 'or start from an example')));
+      const scratch = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', html: icon('edit', 'icon-sm') + 'Write it myself' });
+      scratch.addEventListener('click', () => N.App.decide.add());
+      ctas.append(tour, scratch);
+      box.append(hero, ctas, h('div', { class: 'welcome-divider' }, h('span', null, 'or open a ready-made example')));
       const grid = h('div', { class: 'template-grid' });
       N.Templates.list.slice(0, 6).forEach((t, i) => {
         const b = h('button', { class: 'template-card', type: 'button', style: { '--i': i } });
@@ -122,21 +132,21 @@
       const nV = m.variables.length, nR = m.constraints.length;
       const varErr = Object.keys(e.vars || {}).length;
       const items = [];
-      if (goalOk) items.push({ st: 'ok', t: m.goal.sense === 'target' ? 'Goal: hit a target' : `Goal: ${m.goal.sense === 'min' ? 'make it small' : 'make it big'}`, d: explainGoal() });
-      else if (goalBlank && nR) items.push({ st: 'warn', t: 'No goal yet', d: 'Nadir will just find any answer that fits the rules.', act: ['Write a goal', () => N.App.goal.focus()] });
-      else items.push({ st: 'todo', t: 'Write a goal', d: 'What should be as big — or as small — as possible?', act: ['Write it', () => N.App.goal.focus()] });
+      if (goalOk) items.push({ st: 'ok', t: m.goal.sense === 'target' ? 'Goal: hit a target' : `Goal: ${m.goal.sense === 'min' ? 'make it as small as possible' : 'make it as big as possible'}`, d: explainGoal() });
+      else if (goalBlank && nR) items.push({ st: 'warn', t: 'No goal yet', d: 'Nadir will just find any answer that fits the limits.', act: ['Write a goal', () => N.App.goal.focus()] });
+      else items.push({ st: 'todo', t: 'Write a goal', d: nV ? 'Click the names under the goal box to build it.' : 'What should be as big — or as small — as possible?', act: ['Write it', () => N.App.goal.focus()] });
       if (nV && !varErr) {
         const C = S.compiled;
         const n = C ? C.n : nV;
         items.push({ st: 'ok', t: `${plural(nV, 'decision')}`, d: n !== nV ? `${fmt(n)} numbers for Nadir to choose` : 'The numbers Nadir will choose' });
       } else if (nV) items.push({ st: 'bad', t: `${plural(varErr, 'decision')} to fix`, d: 'Check the highlighted names and ranges.', act: ['Show me', () => N.Solve.focusFirstError()] });
-      else items.push({ st: 'todo', t: 'Add a decision', d: 'Something Nadir can change — a quantity, a price, a yes/no.', act: ['Add', () => N.App.decide.add()] });
-      if (nR) items.push({ st: 'ok', t: plural(nR, 'rule'), d: 'Limits the answer must respect' });
-      else items.push({ st: 'opt', t: 'No rules yet', d: 'Optional — without rules only the ranges limit the answer.', act: ['Add a rule', () => N.App.rules.add()] });
+      else items.push({ st: 'todo', t: 'Add a decision', d: 'Something Nadir can choose — a quantity, an amount, a yes/no.', act: ['Add', () => N.App.decide.add()] });
+      if (nR) items.push({ st: 'ok', t: plural(nR, 'limit'), d: 'What the answer must respect' });
+      else items.push({ st: 'opt', t: 'No limits yet', d: 'Optional — but without limits, “more” is usually unlimited.', act: ['Add a limit', () => N.App.rules.add()] });
       if (errs) items.push({ st: 'bad', t: `${plural(errs, 'line')} to fix`, d: 'The red underline shows exactly where.', act: ['Show me', () => N.Solve.focusFirstError()] });
       const ready = !errs && nV > 0 && (goalOk || (goalBlank && nR > 0));
       box.innerHTML = `<div class="res-empty-mark${ready ? ' is-ready' : ''}">${LOGO}</div><h3>${ready ? 'Ready to solve' : 'Almost there'}</h3>` +
-        `<p>${ready ? `Press ${keys('Mod+Enter')} or the Solve button — Nadir picks the right method for you.` : 'A few things before Nadir can solve:'}</p>`;
+        `<p>${ready ? `Press the button below or ${keys('Mod+Enter')}. Nadir picks the right method for you.` : 'A few things before Nadir can solve:'}</p>`;
       const list = h('ul', { class: 'ready-list' });
       items.forEach((it) => {
         const li = h('li', { class: 'ready-item is-' + it.st });
@@ -151,14 +161,19 @@
       });
       box.append(list);
       const cls = L && L.cls;
-      if (ready && cls && cls.label) {
-        const kind = cls.linear ? (cls.hasInt ? 'linear with whole numbers' : 'linear') : cls.nonsmooth ? 'nonsmooth' : 'smooth and nonlinear';
-        box.append(h('p', { class: 'ready-engine', html: `${icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs')}Your model is ${esc(kind)} — Nadir will use <strong>${esc(cls.label)}</strong>.` }));
-      }
       if (ready) {
-        const go = h('button', { class: 'btn btn-primary btn-lg', type: 'button', html: icon('play', 'icon-sm') + 'Solve now' });
+        const go = h('button', { class: 'btn btn-primary btn-lg', type: 'button', html: icon('play', 'icon-sm') + 'Find the best answer' });
         go.addEventListener('click', () => N.Solve.run());
         box.append(go);
+      }
+      if (ready && cls && cls.label) {
+        const kind = cls.linear ? (cls.hasInt ? 'straight-line formulas with whole numbers' : 'straight-line formulas') : cls.nonsmooth ? 'formulas with jumps' : 'curved formulas';
+        box.append(h('p', { class: 'ready-engine', html: `${icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs')}Your model uses ${esc(kind)} — Nadir will use <strong>${esc(cls.label)}</strong>.` }));
+      }
+      if (!ready && !nV && !nR) {
+        const wz = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('sparkle', 'icon-xs') + 'Use guided setup instead' });
+        wz.addEventListener('click', () => N.Wizard.open());
+        box.append(wz);
       }
       return box;
     }
@@ -173,6 +188,7 @@
       const blank = S.isBlank();
       const box = blank ? welcome() : readiness();
       emptyKind = blank ? 'welcome' : 'ready';
+      root.classList.toggle('is-welcome', blank);
       body.replaceChildren(box);
       chart = null;
     }
@@ -181,7 +197,7 @@
       const st = STATUS[running ? 'running' : r.status] || STATUS.error;
       const el = h('div', { class: 'res-status ' + st.cls });
       const meta = h('span', { class: 'muted res-meta' });
-      el.append(h('span', { class: 'status-badge' }, h('span', { class: 'dot' }), h('strong', null, st.word)), h('span', { class: 'status-say' }, st.say), meta);
+      el.append(h('span', { class: 'status-badge', 'data-tip': 'Technical term: ' + st.tech }, h('span', { class: 'dot' }), h('strong', null, st.word)), h('span', { class: 'status-say' }, st.say), meta);
       return { el, meta };
     }
 
@@ -253,8 +269,8 @@
       if (enabled.size) {
         if (bind.length) {
           const nm = bind.slice(0, 4).map((id) => `<strong>${esc(names.get(id) || 'a rule')}</strong>`);
-          P.push(`What holds you back: ${joinWords(nm)}${bind.length > 4 ? ` and ${fmt(bind.length - 4)} more` : ''} ${bind.length === 1 ? 'is' : 'are'} right at the limit.`);
-        } else if (!onlyEq) P.push('No limit rule is tight — the ranges on your decisions set the answer.');
+          P.push(`What holds you back: ${joinWords(nm)}${bind.length > 4 ? ` and ${fmt(bind.length - 4)} more` : ''} ${bind.length === 1 ? 'is' : 'are'} used up completely.`);
+        } else if (!onlyEq) P.push('None of your limits is used up — the allowed ranges on your decisions set the answer.');
       }
       if (r.engine === 'simplex' && r.constraints && sense !== 'target') {
         let best = null;
@@ -290,14 +306,14 @@
     function decisions(r) {
       const sec = h('section', { class: 'res-section' });
       const adv = S.ui.showAdvancedResults;
-      const head = h('header', null, h('h3', { class: 'label-caps' }, 'Decisions'));
-      const advBtn = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'aria-pressed': String(adv), 'data-tip': 'Show reduced costs, shadow prices and sensitivity ranges' }, 'Advanced');
+      const head = h('header', null, h('h3', { class: 'label-caps' }, 'The plan'));
+      const advBtn = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'aria-pressed': String(adv), 'data-tip': 'For experts: reduced costs, shadow prices and sensitivity ranges' }, adv ? 'Hide expert details' : 'Expert details');
       advBtn.addEventListener('click', () => { S.saveUI({ showAdvancedResults: !S.ui.showAdvancedResults }); render(); });
       head.append(advBtn);
       sec.append(head);
       const tbl = h('table', { class: 'res-table' });
       const hasRC = adv && r.reducedCosts;
-      tbl.innerHTML = `<thead><tr><th>Name</th><th class="num">Value</th><th class="num" style="width:80px"><span class="sr-only">Position in bounds</span></th>${hasRC ? '<th class="num" data-tip="How much the goal would worsen per unit if forced up">Reduced cost</th>' : ''}</tr></thead>`;
+      tbl.innerHTML = `<thead><tr><th>Decision</th><th class="num">Best value</th><th class="num" style="width:80px" data-tip="Where the value sits in its allowed range"><span class="sr-only">Position in range</span></th>${hasRC ? '<th class="num" data-tip="How much the goal would worsen per unit if forced up">Reduced cost</th>' : ''}</tr></thead>`;
       const tb = h('tbody');
       let count = 0;
       const LIMIT = 40;
@@ -344,9 +360,9 @@
       const adv = S.ui.showAdvancedResults;
       const hasDual = adv && r.constraints.some((c) => c.dual != null);
       const sec = h('section', { class: 'res-section' });
-      sec.append(h('header', null, h('h3', { class: 'label-caps' }, 'Rules')));
+      sec.append(h('header', null, h('h3', { class: 'label-caps' }, 'Limits')));
       const tbl = h('table', { class: 'res-table' });
-      tbl.innerHTML = `<thead><tr><th>Rule</th><th class="num" data-tip="Left-hand side at the answer">LHS</th><th class="num" data-tip="Right-hand side at the answer">RHS</th><th class="num" data-tip="Room left before the rule bites">Slack</th><th><span class="sr-only">State</span></th>${hasDual ? '<th class="num" data-tip="Change in goal per unit of RHS">Shadow</th>' : ''}</tr></thead>`;
+      tbl.innerHTML = `<thead><tr><th>Limit</th><th class="num" data-tip="The left side of the limit, with the best plan (technical: LHS)">Used</th><th class="num" data-tip="The right side of the limit (technical: RHS)">Allowed</th><th class="num" data-tip="Room left before the limit bites (technical: slack)">Spare</th><th><span class="sr-only">State</span></th>${hasDual ? '<th class="num" data-tip="Change in goal per unit of RHS (shadow price)">Worth</th>' : ''}</tr></thead>`;
       const tb = h('tbody');
       const LIMIT = 30;
       let list = r.constraints;
@@ -354,7 +370,7 @@
       for (const c of list) {
         const tr = h('tr', { class: 'is-link' });
         const opSym = c.op === '<=' ? '≤' : c.op === '>=' ? '≥' : '=';
-        const badge = !c.ok ? '<span class="badge-off">off</span>' : c.binding ? '<span class="badge-binding" data-tip="Binding — the rule is exactly at its limit">at limit</span>' : '';
+        const badge = !c.ok ? '<span class="badge-off">broken</span>' : c.binding && c.op !== '=' ? '<span class="badge-binding" data-tip="Used up completely (technical: binding). Loosen it to improve the goal.">used up</span>' : '';
         tr.innerHTML = `<td class="nm" title="${esc(opSym)}">${esc(c.label)}</td><td class="num">${esc(fmt(c.lhs))}</td><td class="num">${esc(fmt(c.rhs))}</td><td class="num">${c.op === '=' ? '' : esc(fmt(c.slack))}</td><td>${badge}</td>${hasDual ? `<td class="num">${c.dual == null ? '' : esc(fmt(c.dual))}</td>` : ''}`;
         tr.addEventListener('click', () => N.App.rules.focusRow(c.id));
         tb.append(tr);
@@ -381,10 +397,38 @@
         return box;
       }
       const names = d.rules.map((id) => byId.get(id)).filter(Boolean);
-      box.innerHTML = `<h4>${icon('alert', 'icon-sm')}${names.length > 1 ? "These rules can't all hold together" : names.length ? "This rule can't hold" : 'No solution satisfies every rule'}</h4>`;
+      box.innerHTML = `<h4>${icon('alert', 'icon-sm')}${names.length > 1 ? "These limits can't all be met at once" : names.length ? "This limit can't be met" : 'No plan meets every limit'}</h4>`;
       const p = h('p');
-      p.textContent = names.length ? (names.length > 1 ? `${names.join(', ')}.` : `${names[0]}${d.withBounds === false ? ' together with the bounds on the decisions' : ''}.`) + (d.approximate ? ' Found by searching for the least-violating point.' : ' Relax any one of them to make the model solvable.') : 'Try relaxing a bound or a rule.';
+      p.textContent = names.length ? (names.length > 1 ? `${joinWords(names)} work against each other.` : `${names[0]}${d.withBounds === false ? ' clashes with the allowed ranges in Decisions' : ''}.`) + (d.approximate ? ' Found by searching for the plan that breaks the least.' : ' Loosen any one of them and Nadir can solve it.') : 'Try loosening a range or a limit.';
       box.append(p);
+      const fixes = (d.fixes || []).filter((f) => f.id === '__target' || byId.has(f.id)).sort((a, b) => a.amount - b.amount).slice(0, 4);
+      if (fixes.length) {
+        const list = h('div', { class: 'fix-list' });
+        list.append(h('div', { class: 'fix-list-head' }, fixes.length > 1 ? 'Smallest changes that make it work (together):' : 'Smallest change that makes it work:'));
+        fixes.forEach((f) => {
+          const nm = f.id === '__target' ? 'the target' : byId.get(f.id);
+          const amt = niceUp(f.amount);
+          const verb = f.op === '>=' ? `need <strong class="num">${esc(fmt(amt))}</strong> less` : f.op === '<=' ? `allow <strong class="num">${esc(fmt(amt))}</strong> more` : `move it by <strong class="num">${esc(fmt(amt))}</strong>`;
+          const row = h('div', { class: 'fix-item', html: `<span class="fix-item-txt"><strong>${esc(nm)}</strong>: ${verb}</span>` });
+          const rule = S.model.constraints.find((c) => c.id === f.id);
+          if (rule && canPatch(rule.expr)) {
+            const ap = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('check', 'icon-xs') + 'Apply & re-solve' });
+            ap.addEventListener('click', () => {
+              S.edit(() => { rule.expr = rule.expr.replace(/\s+$/, '') + (f.dir > 0 ? ' + ' : ' - ') + N.util.fmt.plain(amt); }, { undo: true });
+              N.toast(`Loosened ${nm}`, { action: { label: 'Undo', run: () => S.undo() } });
+              setTimeout(() => N.Solve.run(), 30);
+            });
+            row.append(ap);
+          }
+          if (rule) {
+            const off = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'data-tip': 'Switch this limit off and solve without it' }, 'Pause it');
+            off.addEventListener('click', () => { S.edit(() => { rule.enabled = false; }, { undo: true }); setTimeout(() => N.Solve.run(), 30); });
+            row.append(off);
+          }
+          list.append(row);
+        });
+        box.append(list);
+      }
       const chips = h('div', { class: 'diag-rules' });
       d.rules.forEach((id) => {
         if (!byId.has(id)) return;
@@ -468,7 +512,7 @@
       root.classList.toggle('is-empty', !r && !running);
       if (!r && !running) { empty(); return; }
       emptyKind = '';
-      root.classList.remove('is-empty');
+      root.classList.remove('is-empty', 'is-welcome');
       const wrap = h('div', { class: 'res' + (S.stale && !running ? ' is-stale' : '') + (running ? ' is-running' : '') });
       const src = running ? (S.progress || {}) : r;
       const sl = statusLine(r || {}, running);
@@ -494,7 +538,7 @@
       if (showHero) {
         const hero = h('div', { class: 'res-hero' + (!running && r.status === 'optimal' ? ' is-optimal' : '') });
         const sense = S.model.goal.sense;
-        const label = h('div', { class: 'res-hero-label' }, running ? 'Best so far' : r.status === 'infeasible' ? 'Goal at least-violating point' : sense === 'target' ? 'Goal reached' : sense === 'min' ? 'Minimum' : 'Maximum');
+        const label = h('div', { class: 'res-hero-label' }, running ? 'Best so far' : r.status === 'infeasible' ? 'Goal at the closest plan' : sense === 'target' ? 'Goal reached' : sense === 'min' ? 'Lowest possible goal' : 'Highest possible goal');
         const val = h('div', { class: 'res-hero-value' });
         const num = h('span', { class: 'num' }, running ? (Number.isFinite(src.best) ? fmt(src.best) : '…') : fmt(r.objective));
         if (!running && (r.status === 'optimal' || r.status === 'feasible')) val.append(h('span', { class: 'found-dot', 'aria-hidden': 'true' }));
@@ -525,7 +569,24 @@
       }
       if (!running && r.status === 'infeasible') wrap.append(diagnosis(r));
       if (!running && r.status === 'unbounded') {
-        wrap.append(h('div', { class: 'diag-box', html: `<h4>${icon('alert', 'icon-sm')}The goal can grow without limit</h4><p>Add an upper bound on a decision or a rule that caps the goal.</p>` }));
+        const ub = h('div', { class: 'diag-box', html: `<h4>${icon('alert', 'icon-sm')}The goal can grow forever</h4><p>Nothing stops ${r.growing && r.growing.length ? 'these decisions' : 'some decision'} from growing without end. Give ${r.growing && r.growing.length === 1 ? 'it' : 'them'} a maximum, or add a limit that caps ${r.growing && r.growing.length === 1 ? 'it' : 'them'}.</p>` });
+        const chips = h('div', { class: 'diag-rules' });
+        const seen = new Set();
+        (r.growing || []).slice(0, 6).forEach((j) => {
+          const v = r.layout.find((L) => j >= L.offset && j < L.offset + L.size);
+          if (!v) return;
+          const label = v.size === 1 ? v.name : friendlyName(v, j - v.offset);
+          if (seen.has(label)) return;
+          seen.add(label);
+          const b = h('button', { type: 'button', html: icon('arrowRight', 'icon-xs') + `Set a max for <span class="mono">${esc(label)}</span>` });
+          b.addEventListener('click', () => N.App.decide.focusUpper(v.id));
+          chips.append(b);
+        });
+        const addR = h('button', { type: 'button', html: icon('plus', 'icon-xs') + 'Add a limit' });
+        addR.addEventListener('click', () => N.App.rules.add());
+        chips.append(addR);
+        ub.append(chips);
+        wrap.append(ub);
       }
       if (!running && r.status === 'stopped') {
         wrap.append(h('div', { class: 'diag-box', html: `<h4>${icon('info', 'icon-sm')}Stopped before an answer</h4><p>${esc(r.message || 'The solve was interrupted. Try the Thorough preset or a longer time limit in Settings.')}</p>` }));
@@ -539,7 +600,7 @@
       else chart = null;
       if (!running && r.values && r.status !== 'infeasible') {
         const acts = h('div', { class: 'res-actions' });
-        const keep = h('button', { class: 'btn btn-soft', type: 'button', html: icon('pin', 'icon-sm') + 'Keep solution', 'data-tip': 'Use these values as the new starting point' });
+        const keep = h('button', { class: 'btn btn-soft', type: 'button', html: icon('pin', 'icon-sm') + 'Use as starting point', 'data-tip': 'Copy these values into the decisions, so the live checks show this plan' });
         keep.addEventListener('click', () => N.Solve.keep());
         const restore = h('button', { class: 'btn btn-outline', type: 'button', html: icon('restore', 'icon-sm') + 'Restore', disabled: !S.kept, 'data-tip': 'Go back to the values before Keep' });
         restore.addEventListener('click', () => N.Solve.restore());

@@ -4,6 +4,19 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## What's new in v3 — built for newcomers
+- **Guided setup** (`js/app/wizard.js` + pure `js/engine/guide.js`). Pick a situation (*Make the most profit · Split a budget · Pick the best set · Cheapest mix · Who does what · Ship at lowest cost*) and fill in a small table. Nadir writes the goal, decisions, limits and numbers for you, checks your inputs live ("Labour hours used per Desks is empty"), then solves. Each recipe opens with a worked example you can clear. You can reach it from the welcome panel, the header button, the Goal card tip, the palette, the Help menu, or `?wizard[=produce|budget|pick|blend|assign|ship]`.
+- **Click-to-build formulas**: when you focus the goal or a limit, a bar appears under it with your decisions, numbers, ≤ / ≥ / =, + − × ÷ and "total of…". It adds `*` and spacing for you, so you don't need to know the syntax.
+- **One-click error fixes**: errors are written in plain English and come with buttons, for example "Use *ovenHours*", "Add *ovenHour* as a number / as a decision", and "≤ at most / ≥ at least / = exactly" when a limit has no comparison.
+- **Plain-language labels**: Goal · **Decisions** · **Limits** · **Numbers**. Statuses read *Best answer / Good answer / No answer fits / No ceiling* (the technical term is in the tooltip). Columns read *Used / Allowed / Spare*. "slack/binding" became "*N to spare* / *at the limit* / *used up*". Shadow prices and the rest sit under "Expert details".
+- **Infeasible → concrete fixes**: an elastic LP finds the smallest changes that make the model solvable ("Cake demand: need 4 less"). Each fix has **Apply & re-solve** (patches the limit's right side, can be undone) and **Pause it**.
+- **Unbounded → culprit**: Nadir names the decisions that grow forever, and **Set a max for x** jumps straight to that box.
+- **Better nonlinear integer solving**: after DE (and ALM polish), an integer local search (±1 moves and pairwise swaps, re-polishing the continuous part) finds the true best on small mixed-integer nonlinear models.
+- **Responsive at half-screen**: single column below 1100px. The welcome panel sits inline at the top (it is no longer hidden in a bottom sheet), toasts move to the top so they never cover results, and the header collapses its secondary actions.
+- **Visual polish** (`css/polish.css`): higher-contrast secondary text (WCAG AA), larger card titles, white input boxes that look editable, a gradient guided-setup hero, and tidier limit suggestions.
+- Your logo is used as the PWA / touch icon (`images/nadir-icon.png`).
+- Tests: engine 27/27 (`engine-check.html`). New: infeasible fixes, unbounded culprit, MINLP true best, all 6 guide recipes solve, unknown-name quick fixes.
+
 ## What's new in v2
 - **Plain-English layer** (`js/engine/explain.js`, pure, runs in the worker too). The goal and every rule are read back as a sentence, for example "The total of wood × make must be at most woodStock". Labels are used where they exist (`make[Desks]`). You can turn this off in Settings → Behaviour or from the palette.
 - **"In plain words" result story**: the best plan, the goal compared with your starting values, which rules are holding you back, and the single biggest lever (the largest shadow price, Simplex only). There are also notes that explain the engine choice.
@@ -63,6 +76,7 @@ Product mix, Diet, Transportation, Assignment, Knapsack, Portfolio, Curve fit, B
 | `index.html` | App |
 | `index.html?test` | Runs the built-in test suite (25 tests: spec tests 1–10, language, gradient, text round-trip, plain words, LU, revised vs dense, 3,000×3,000 sparse LP, ranging, MIP v2, performance, worker, all templates, live-check budget) |
 | `index.html?tour` | Starts the guided tour |
+| `index.html?wizard[=kind]` | Opens Guided setup (optionally straight into `produce`, `budget`, `pick`, `blend`, `assign`, `ship`) |
 | `index.html?guide[=functions\|results]` | Opens the Language guide |
 | `index.html?template=<key>` | Loads a template (`bakery`, `ad-budget`, `product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `break-even`) |
 | `&solve` | Solves right after loading |

@@ -112,7 +112,9 @@ NadirEngine.define('model', function (E) {
       if (FUNCTIONS[name]) throw err(node, `'${name}' is a function — use ${FUNCTIONS[name].sig}`);
       const pool = [...scope.keys(), ...(opts.names || []), ...Object.keys(FUNCTIONS)];
       const s = E.suggest(name, pool);
-      throw err(node, s ? `Unknown name '${name}'. Did you mean '${s}'?` : `Unknown name '${name}'`);
+      const ue = err(node, s ? `Unknown name '${name}'. Did you mean '${s}'?` : `Unknown name '${name}'`);
+      ue.fix = { kind: 'unknown', name, suggest: s || null, canDefine: !opts.varNames || allowVars };
+      throw ue;
     }
 
     function indexSpec(arg, n, pos) {
@@ -405,7 +407,7 @@ NadirEngine.define('model', function (E) {
     const errors = { goal: null, target: null, vars: {}, rules: {}, params: {}, model: null };
     let errorCount = 0;
     const fail = (bucket, id, field, e) => {
-      const info = e && e.nadir ? { message: e.message, start: e.start, end: e.end } : { message: String(e && e.message || e), start: 0, end: 0 };
+      const info = e && e.nadir ? { message: e.message, start: e.start, end: e.end, fix: e.fix || null } : { message: String(e && e.message || e), start: 0, end: 0 };
       if (!e || !e.nadir) console.error(e);
       if (id == null) errors[bucket] = info;
       else if (field) (errors[bucket][id] = errors[bucket][id] || {})[field] = info;

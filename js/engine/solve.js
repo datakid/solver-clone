@@ -185,13 +185,133 @@ NadirEngine.define('solve', function (E) {
     }
     const rules = set.map((gi) => groups[gi].cid);
     const withBounds = feasible(set, true);
-    return { kind: 'rules', rules, withBounds, exact: Date.now() < deadline };
+    const fixes = relaxLP(C, A, Math.max(deadline, Date.now() + 1500)) || [];
+    return { kind: 'rules', rules, withBounds, exact: Date.now() < deadline, fixes };
+  }
+
+  function relaxLP(C, A, deadline) {
+    try {
+      const P0 = buildLP(C, A, true);
+      const n = P0.n;
+      let N = n;
+      const lower = Array.from(P0.lower), upper = Array.from(P0.upper);
+      const rows = [], cols = [], cost = [];
+      P0.rows.forEach((r) => {
+        const idx = Array.from(r.idx), val = Array.from(r.val);
+        const w = 1 / Math.max(1, Math.abs(r.rhs));
+        const mine = [];
+        if (r.op === '<=' || r.op === '=') { idx.push(N); val.push(-1); mine.push([N, 1]); lower.push(0); upper.push(Infinity); cost.push(w); N++; }
+        if (r.op === '>=' || r.op === '=') { idx.push(N); val.push(1); mine.push([N, -1]); lower.push(0); upper.push(Infinity); cost.push(w); N++; }
+        rows.push({ idx, val, op: r.op, rhs: r.rhs });
+        cols.push(mine);
+      });
+      const c = new Float64Array(N);
+      cost.forEach((w, i) => { c[n + i] = w; });
+      const r = E.solveLP({ n: N, c, c0: 0, rows, lower: Float64Array.from(lower), upper: Float64Array.from(upper), maximize: false }, { deadline });
+      if (r.status !== 'optimal' || !r.x) return null;
+      const by = new Map();
+      cols.forEach((mine, k) => {
+        const ri = P0.src[k];
+        for (const [j, dir] of mine) {
+          const a = r.x[j];
+          if (!(a > 1e-7)) continue;
+          const id = ri >= 0 ? C.rows[ri].cid : '__target';
+          const cur = by.get(id);
+          if (!cur) by.set(id, { id, amount: clean(a), dir, op: ri >= 0 ? C.rows[ri].op : '=', count: 1 });
+          else { cur.count++; if (a > cur.amount) { cur.amount = clean(a); cur.dir = dir; } }
+        }
+      });
+      return [...by.values()];
+    } catch (e) { return null; }
+  }
+
+  function fixesFromReport(rows) {
+    const by = new Map();
+    rows.forEach((r) => {
+      if (r.ok) return;
+      const d = r.lhs - r.rhs;
+      const amount = clean(Math.abs(d));
+      const dir = d > 0 ? 1 : -1;
+      const cur = by.get(r.id);
+      if (!cur) by.set(r.id, { id: r.id, amount, dir, op: r.op, count: 1, approximate: true });
+      else { cur.count++; if (amount > cur.amount) { cur.amount = amount; cur.dir = dir; } }
+    });
+    return [...by.values()];
   }
 
   function diagnoseNL(C, A, x) {
     const rep = rowReport(C, x, A.rowsIdx, null);
     const bad = [...new Set(rep.rows.filter((r) => !r.ok).map((r) => r.id))];
-    return { kind: 'rules', rules: bad, withBounds: false, approximate: true };
+    return { kind: 'rules', rules: bad, withBounds: false, approximate: true, fixes: fixesFromReport(rep.rows) };
+  }
+
+  function growingLP(C, A, deadline) {
+    try {
+      const LP = buildLP(C, A, true);
+      const BIG = 1e7;
+      const lo = Float64Array.from(LP.lower, (v) => Math.max(v, -BIG));
+      const hi = Float64Array.from(LP.upper, (v) => Math.min(v, BIG));
+      const r = E.solveLP(Object.assign({}, LP, { lower: lo, upper: hi }), { deadline });
+      if (!r.x) return [];
+      const out = [];
+      for (let j = 0; j < C.n && out.length < 50; j++) {
+        const x = r.x[j];
+        if ((x >= BIG * 0.999 && LP.upper[j] === Infinity) || (x <= -BIG * 0.999 && LP.lower[j] === -Infinity)) out.push(j);
+      }
+      return out;
+    } catch (e) { return []; }
+  }
+
+  function intPolish(P, C, A, start, settings, deadline, dobj) {
+    const isInt = C.integer;
+    const n = C.n;
+    const ints = [];
+    for (let j = 0; j < n; j++) if (isInt[j]) ints.push(j);
+    let cur = { x: Float64Array.from(start.x), f: start.f, v: start.v };
+    if (!ints.length || ints.length > 400) return { best: cur, moves: 0 };
+    const anyReal = ints.length < n;
+    const smooth = !A.nonsmooth;
+    const at = (y) => {
+      if (anyReal && smooth) {
+        const lo = Float64Array.from(P.lower), hi = Float64Array.from(P.upper);
+        for (const j of ints) { lo[j] = y[j]; hi[j] = y[j]; }
+        const pol = E.alm(P, y, { tol: Math.max(settings.tol, 1e-9), deadline, dobj, lower: lo, upper: hi, maxIt: 300 });
+        const sc = P.score(pol.x);
+        return { x: pol.x, f: sc.f, v: sc.worst };
+      }
+      const sc = P.score(y);
+      return { x: Float64Array.from(y), f: sc.f, v: sc.worst };
+    };
+    const inBox = (y, j) => y[j] >= P.lower[j] - 1e-9 && y[j] <= P.upper[j] + 1e-9;
+    let moves = 0;
+    for (let round = 0; round < 60 && Date.now() < deadline; round++) {
+      let improved = false;
+      for (const j of ints) {
+        for (const d of [-1, 1]) {
+          const y = Float64Array.from(cur.x);
+          y[j] = Math.round(y[j]) + d;
+          if (!inBox(y, j)) continue;
+          const c = at(y);
+          if (E.betterPoint(c, cur, P.feasTol)) { cur = c; improved = true; moves++; }
+        }
+        if (Date.now() > deadline) break;
+      }
+      if (!improved && ints.length <= 40) {
+        for (let a = 0; a < ints.length && !improved && Date.now() < deadline; a++) {
+          for (let b = 0; b < ints.length && !improved; b++) {
+            if (a === b) continue;
+            const y = Float64Array.from(cur.x);
+            const ja = ints[a], jb = ints[b];
+            y[ja] = Math.round(y[ja]) + 1; y[jb] = Math.round(y[jb]) - 1;
+            if (!inBox(y, ja) || !inBox(y, jb)) continue;
+            const c = at(y);
+            if (E.betterPoint(c, cur, P.feasTol)) { cur = c; improved = true; moves++; }
+          }
+        }
+      }
+      if (!improved) break;
+    }
+    return { best: cur, moves };
   }
 
   function solveCompiled(C, settingsIn, post) {
@@ -247,7 +367,7 @@ NadirEngine.define('solve', function (E) {
         const duals = engine === 'simplex' && r.duals ? Float64Array.from(A.rowsIdx.map((_, k) => r.duals[k])) : null;
         return pack(r.status, r.x, { duals, reduced: engine === 'simplex' ? r.reduced : null, ranging: engine === 'simplex' ? r.ranging : null, iterations: iters, more: metric });
       }
-      if (r.status === 'unbounded') return pack('unbounded', null, { iterations: iters, more: metric });
+      if (r.status === 'unbounded') return pack('unbounded', null, { iterations: iters, more: Object.assign({ growing: growingLP(C, A, Date.now() + 2000) }, metric) });
       if (r.status === 'limit' || r.status === 'stopped') return pack('stopped', null, { iterations: iters, more: Object.assign({ message: 'Hit the time or node limit before finding a solution' }, metric) });
       let diagnosis = null;
       if (engine === 'bb') {
@@ -285,11 +405,19 @@ NadirEngine.define('solve', function (E) {
           if (E.betterPoint(cand, best, P.feasTol)) { best = cand; more.polished = true; }
         }
       }
+      if (A.hasInt) {
+        const lp = intPolish(P, C, A, best, settings, deadline, dobj);
+        if (lp.moves && E.betterPoint(lp.best, best, P.feasTol)) { best = lp.best; more.polished = true; more.localMoves = lp.moves; }
+      }
       R.push(more.generations, sign(C, best.f), best.v, true);
     }
     const feasible = best.v <= P.feasTol * 10;
     const goalVal = C.ir.evaluate(best.x)[C.goalRoot >= 0 ? C.goalRoot : 0];
-    if (feasible && C.sense !== 'target' && Math.abs(goalVal) > 1e14) return pack('unbounded', null, { iterations: R.iter, more });
+    if (feasible && C.sense !== 'target' && Math.abs(goalVal) > 1e14) {
+      const growing = [];
+      for (let j = 0; j < C.n && growing.length < 50; j++) if (Math.abs(best.x[j]) > 1e6) growing.push(j);
+      return pack('unbounded', null, { iterations: R.iter, more: Object.assign({ growing }, more) });
+    }
     if (!feasible) {
       const diagnosis = diagnoseNL(C, A, best.x);
       const r = pack('infeasible', best.x, { iterations: R.iter, more: Object.assign({ diagnosis, leastViolation: best.v }, more) });

@@ -33,20 +33,25 @@
   function commitOnBlur(el) { el.addEventListener('focusout', (e) => { if (!el.contains(e.relatedTarget)) S.commitEdit(); }); }
 
   function GoalCard() {
-    const c = shell('goal-card', 'Goal', { count: false, step: 1, sub: 'What do you want as big — or as small — as possible?' });
+    const c = shell('goal-card', 'Goal', { count: false, step: 1, sub: 'What should Nadir make as big — or as small — as possible?' });
     const view = segmented([{ value: 'form', label: 'Form' }, { value: 'text', label: 'Text' }], S.ui.goalView, (v) => setView(v));
     view.el.setAttribute('aria-label', 'Editor view');
     c.actions.append(view.el);
     const form = h('div', { class: 'goal-form' });
     const sense = segmented([
-      { value: 'max', label: 'Maximize' }, { value: 'min', label: 'Minimize' }, { value: 'target', label: 'Target' }
+      { value: 'max', label: '↑ Maximize', tip: 'As large as possible — profit, reach, output' }, { value: 'min', label: '↓ Minimize', tip: 'As small as possible — cost, time, waste' }, { value: 'target', label: '◎ Hit a target', tip: 'Make it equal a number you choose' }
     ], S.model.goal.sense, (v) => { S.edit((m) => { m.goal.sense = v; if (v === 'target' && m.goal.target == null) m.goal.target = ''; }, { undo: true }); syncTarget(); if (v === 'target') target.focus('end'); }, 'segmented-lg');
     sense.el.setAttribute('aria-label', 'Goal direction');
-    const expr = N.Field.create({ size: 'lg', placeholder: 'e.g. 40*chairs + 90*tables', ariaLabel: 'Goal expression', id: 'goal-input', onInput: editField(() => S.model.goal, 'expr'), onKey: (e) => { if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); N.Cards.focusFirstRule(); } } });
+    const expr = N.Field.create({ size: 'lg', assist: 'goal', placeholder: 'e.g. 40 * chairs + 90 * tables', ariaLabel: 'Goal expression', id: 'goal-input', onInput: editField(() => S.model.goal, 'expr'), onKey: (e) => { if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); N.Cards.focusFirstRule(); } } });
     const target = N.Field.create({ size: 'lg', placeholder: 'value', ariaLabel: 'Target value', noVars: true, onInput: editField(() => S.model.goal, 'target') });
     const targetWrap = h('div', { class: 'goal-target' }, h('span', { class: 'goal-eq' }, '='), target.el);
-    const err = N.Field.errorLine();
+    const err = N.Field.errorLine(expr, { vars: true });
     const terr = N.Field.errorLine();
+    const noVars = h('div', { class: 'goal-novars', hidden: true });
+    noVars.innerHTML = `${icon('info', 'icon-xs')}<span>Tip: first add what Nadir can <strong>decide</strong> (step 2) and your <strong>numbers</strong> (step 4) — then click their names to build the goal.</span>`;
+    const nvBtn = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('sparkle', 'icon-xs') + 'Use guided setup' });
+    nvBtn.addEventListener('click', () => N.Wizard.open());
+    noVars.append(nvBtn);
     const liveVal = h('span', { class: 'num' }, '—');
     const liveLabel = h('span', null, 'Current value ');
     const targetGap = h('span', { class: 'faint' });
@@ -54,7 +59,7 @@
     const says = h('p', { class: 'plain-line goal-says', hidden: true });
     const line = h('div', { class: 'goal-line' }, sense.el, expr.el, targetWrap);
     const liveBox = h('span', { class: 'goal-live-val' }, liveLabel, liveVal, targetGap);
-    form.append(line, err.el, terr.el, says, h('div', { class: 'goal-live' }, liveBox, engine));
+    form.append(line, err.el, terr.el, says, noVars, h('div', { class: 'goal-live' }, liveBox, engine));
     commitOnBlur(form);
 
     const text = h('div', { class: 'text-view', hidden: true });
@@ -119,14 +124,15 @@
       target.setError(e.target); terr.set(S.model.goal.sense === 'target' ? e.target : null);
       const v = L.check ? L.check.goal : null;
       const has = v != null && !e.goal;
-      liveLabel.textContent = has ? 'At your current values ' : E.isBlank(S.model.goal.expr) ? 'Write what to optimize, using your decision names' : '';
+      noVars.hidden = S.model.variables.length > 0 || !E.isBlank(S.model.goal.expr);
+      liveLabel.textContent = has ? 'Right now (before solving) it is ' : E.isBlank(S.model.goal.expr) ? (S.model.variables.length ? 'Write a formula using the names below — or click them' : '') : '';
       liveVal.textContent = has ? fmt(v) : '';
       liveBox.classList.toggle('has-value', has);
       c.el.classList.toggle('has-goal', !E.isBlank(S.model.goal.expr) && !e.goal);
       const C = S.compiled;
       targetGap.textContent = has && S.model.goal.sense === 'target' && C && C.target != null ? `  ·  ${fmt(Math.abs(v - C.target))} from target` : '';
       const cls = L.cls;
-      if (cls && cls.engine) engine.innerHTML = icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs') + esc(`${cls.linear ? 'Linear' : cls.nonsmooth ? 'Nonsmooth' : 'Smooth nonlinear'}${cls.hasInt ? ' · integer' : ''} → ${cls.label}`);
+      if (cls && cls.engine) { engine.innerHTML = icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs') + esc(`${cls.linear ? 'Straight-line' : cls.nonsmooth ? 'Bumpy' : 'Curved'}${cls.hasInt ? ', whole numbers' : ''} · ${cls.label}`); engine.dataset.tip = cls.linear ? 'Every formula is a weighted sum, so Nadir can prove the answer is the very best' : cls.nonsmooth ? 'Has jumps or kinks, so Nadir searches widely for a great answer' : 'Has curves, so Nadir tries several starting points and keeps the best'; }
       else engine.textContent = '';
     }
     S.on('model', bind);
@@ -139,26 +145,28 @@
   function flash(el) { el.classList.remove('is-flash'); void el.offsetWidth; el.classList.add('is-flash'); setTimeout(() => el.classList.remove('is-flash'), 1300); }
 
   function DecideCard() {
-    const c = shell('decide-card', 'Decide', { foot: true, step: 2, sub: 'The numbers Nadir is free to choose.' });
+    const c = shell('decide-card', 'Decisions', { foot: true, step: 2, sub: 'What Nadir chooses for you — how many to make, how much to spend, yes or no.' });
     const list = h('div', { class: 'rows', role: 'list', 'aria-label': 'Decisions' });
-    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Decision</span>' });
+    const add = h('button', { class: 'add-row', type: 'button', html: icon('plus', 'icon-sm') + '<span>Add a decision</span>' });
     add.addEventListener('click', () => addVar());
-    const colHead = h('div', { class: 'col-head var-head', 'aria-hidden': 'true', html: '<span></span><span>Name</span><span>Size</span><span>Kind</span><span>Allowed range</span>' });
+    const colHead = h('div', { class: 'col-head var-head', 'aria-hidden': 'true', html: '<span></span><span>Name</span><span data-tip="1 for a single number, 3 for a list of three, 2x3 for a table">How many</span><span>Kind</span><span>Allowed range</span>' });
     c.body.append(colHead, list, add);
-    const TYPES = [{ value: 'real', label: '1.5', tip: 'Any number — decimals allowed', aria: 'Any number' }, { value: 'int', label: '1, 2', tip: 'Whole numbers only', aria: 'Whole numbers' }, { value: 'bin', label: 'Y/N', tip: 'Yes or no — 0 or 1', aria: 'Yes or no' }];
+    const TYPES = [{ value: 'real', label: '2.5', tip: 'Any amount — decimals allowed (kg, hours, dollars)', aria: 'Any number' }, { value: 'int', label: '1 2 3', tip: 'Whole numbers only (chairs, trucks, people)', aria: 'Whole numbers' }, { value: 'bin', label: 'Y/N', tip: 'Yes or no — do it (1) or not (0)', aria: 'Yes or no' }];
 
     const rows = keyedList(list, (item) => {
       let cur = item;
       const get = () => cur;
       const el = h('div', { class: 'row var-row', role: 'listitem', dataset: { id: item.id } });
       const grip = h('button', { class: 'grip', type: 'button', 'aria-label': 'Drag to reorder (or use arrow keys)', html: icon('grip', 'icon-sm') });
-      const name = textInput({ className: 'input-mono name-input', value: item.name, placeholder: 'name', aria: 'Variable name', field: 'name', onInput: (v) => { S.beginEdit(); cur.name = v; S.edit(null, { field: 'name' }); bx.textContent = v.trim() || '·'; } });
+      const name = textInput({ className: 'input-mono name-input', value: item.name, placeholder: 'e.g. chairs', aria: 'Decision name', field: 'name', onInput: (v) => { S.beginEdit(); cur.name = v; S.edit(null, { field: 'name' }); bx.textContent = v.trim() || '·'; } });
       const shape = textInput({ className: 'shape-input', value: item.shape === '1' ? '' : item.shape, placeholder: '1', aria: 'Size — 1, 3, 2x3 or a given name', field: 'shape', onInput: (v) => { S.beginEdit(); cur.shape = v.trim() || '1'; S.edit(null, { field: 'shape' }); } });
       shape.el.dataset.tip = 'How many: 1 for a single number, 3 for a list, 2x3 for a table';
       const type = segmented(TYPES, item.type, (v) => { S.edit(() => { cur.type = v; }, { undo: true }); syncType(); }, 'segmented-mono');
       type.el.setAttribute('aria-label', 'Type');
-      const lower = N.Field.create({ placeholder: '', ariaLabel: 'Lower bound', noVars: true, value: item.lower, onInput: editField(get, 'lower') });
-      const upper = N.Field.create({ placeholder: '∞', ariaLabel: 'Upper bound', noVars: true, value: item.upper, onInput: editField(get, 'upper') });
+      const lower = N.Field.create({ placeholder: '', ariaLabel: 'Lowest allowed', noVars: true, value: item.lower, onInput: editField(get, 'lower') });
+      const upper = N.Field.create({ placeholder: 'no max', ariaLabel: 'Highest allowed', noVars: true, value: item.upper, onInput: editField(get, 'upper') });
+      lower.el.dataset.tip = 'Lowest allowed — blank means 0';
+      upper.el.dataset.tip = 'Highest allowed — blank means no limit';
       const bx = h('span', { class: 'bounds-x' }, item.name.trim() || '·');
       const bounds = h('div', { class: 'bounds' }, lower.el, h('span', { class: 'bounds-sym' }, '≤'), bx, h('span', { class: 'bounds-sym' }, '≤'), upper.el);
       const advBtn = h('button', { class: 'btn btn-ghost btn-icon btn-sm', type: 'button', 'aria-label': 'Advanced: initial values and labels', 'aria-expanded': 'false', 'data-tip': 'Initial values & labels', html: icon('sliders', 'icon-sm') });
@@ -190,7 +198,7 @@
       function syncType() {
         const bin = cur.type === 'bin';
         lower.input.placeholder = bin ? '0' : S.settings.nonNegative !== false ? '0' : '−∞';
-        upper.input.placeholder = bin ? '1' : '∞';
+        upper.input.placeholder = bin ? '1' : 'no max';
       }
       if (S.ui.advanced[item.id] || (item.labels && item.labels.length && false)) { adv.hidden = false; advBtn.setAttribute('aria-expanded', 'true'); advBtn.setAttribute('aria-pressed', 'true'); }
       syncType();
@@ -228,10 +236,12 @@
       for (const n of ['x', 'y', 'z', 'w', 'u', 'v']) if (!used.has(n)) return n;
       let k = 1; while (used.has('x' + k)) k++; return 'x' + k;
     }
-    function addVar() {
-      const v = { id: E.uid('v'), name: nextName(), shape: '1', type: 'real', lower: '', upper: '', init: '', labels: [] };
+    function addVar(nm, opts) {
+      const o = opts || {};
+      const v = { id: E.uid('v'), name: typeof nm === 'string' && nm ? nm : nextName(), shape: '1', type: 'real', lower: '', upper: '', init: '', labels: [] };
       S.edit((m) => m.variables.push(v), { structural: true });
-      requestAnimationFrame(() => { const r = rows.get(v.id); if (r) { r.focus(); r.el.querySelector('.name-input').select(); } });
+      requestAnimationFrame(() => { const r = rows.get(v.id); if (r) { if (o.quiet) r.flash(); else { r.focus(); r.el.querySelector('.name-input').select(); } } });
+      return v;
     }
     function removeVar(id, focusPrev) {
       const i = S.model.variables.findIndex((v) => v.id === id);
@@ -253,7 +263,7 @@
       if (n !== S.model.variables.length) parts.push(`${fmt(n)} values`);
       if (ints) parts.push(`${fmt(ints)} whole-number`);
       if (errs) parts.push(`${errs} to fix`);
-      const t = S.model.variables.length ? parts.join(' · ') : 'Add something Nadir can change — like how many chairs to build';
+      const t = S.model.variables.length ? parts.join(' · ') : 'Example: “chairs” — how many chairs to build. Nadir will pick the best number.';
       if (c.foot.textContent !== t) c.foot.textContent = t;
     }
     S.on('structure', sync);
@@ -262,7 +272,7 @@
     S.on('settings', () => rows.rows.forEach((r) => r.refresh()));
     S.on('symbols', () => rows.rows.forEach((r) => r.refresh()));
     sync();
-    return { el: c.el, rows, add: addVar, focusRow: (id) => { const r = rows.get(id); if (r) { r.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); r.flash(); r.focus(); } } };
+    return { el: c.el, rows, add: addVar, focusUpper: (id) => { const r = rows.get(id); if (r) { r.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); r.flash(); setTimeout(() => { const i = r.el.querySelector('.bounds .code:last-child input'); if (i) i.focus(); }, 250); } }, focusRow: (id) => { const r = rows.get(id); if (r) { r.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); r.flash(); r.focus(); } } };
   }
 
   N.Cards = N.Cards || {};

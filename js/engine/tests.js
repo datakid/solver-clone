@@ -273,6 +273,58 @@ NadirEngine.define('tests', function (E) {
           const ms = Date.now() - t0;
           return (r.status === 'optimal' && ms < 400) || `status ${r.status} in ${ms}ms`;
         }
+      },
+      {
+        name: 'v3 · Infeasible models come with concrete fixes', run() {
+          const a = V('a'), b = V('b');
+          const m = M({ sense: 'max', expr: 'a + b' }, [a, b], [R('a + b <= 10', 'Cap'), R('a >= 8', 'MinA'), R('b >= 6', 'MinB')]);
+          const r = E.solve(m, {});
+          const fx = (r.diagnosis && r.diagnosis.fixes) || [];
+          const tot = fx.reduce((s, f) => s + f.amount, 0);
+          return (r.status === 'infeasible' && fx.length >= 1 && close(tot, 4, 1e-6)) || JSON.stringify({ status: r.status, fx });
+        }
+      },
+      {
+        name: 'v3 · Unbounded points at the growing decision', run() {
+          const r = E.solve(M({ sense: 'max', expr: 'x + 2y' }, [V('x', { upper: '5' }), V('y')], [R('x - y <= 3')]), {});
+          return (r.status === 'unbounded' && Array.isArray(r.growing) && r.growing.includes(1) && !r.growing.includes(0)) || JSON.stringify({ status: r.status, g: r.growing });
+        }
+      },
+      {
+        name: 'v3 · Nonlinear integer model finds the true best', run() {
+          const r = E.solve(M({ sense: 'min', expr: '(x - 3.4)^2 + (y - 1.6)^2 + x*y/10' }, [V('x', { type: 'int', upper: '10' }), V('y', { type: 'int', upper: '10' })], [R('x + y >= 4')]), {});
+          return (['optimal', 'feasible'].includes(r.status) && r.values[0] === 3 && r.values[1] === 1) || fmt(r);
+        }
+      },
+      {
+        name: 'Guide · every recipe builds a model that solves', run() {
+          const want = {
+            produce: [{ items: [{ name: 'Chairs', value: '45' }, { name: 'Tables', value: '80' }], resources: [{ name: 'Wood', available: '400', use: ['5', '20'] }, { name: 'Labour hours', available: '130', use: ['2', '5'] }], whole: true }, 2925],
+            budget: [{ channels: [{ name: 'Search', value: '5000' }, { name: 'Social', value: '8000', max: '6000' }], total: '10000', diminishing: true }, null],
+            pick: [{ items: [{ name: 'Tent', value: 10, cost: 5 }, { name: 'Stove', value: 13, cost: 6 }, { name: 'Camera', value: 7, cost: 3 }, { name: 'Food', value: 15, cost: 7 }], limit: '15', costLabel: 'Weight' }, 32],
+            blend: [{ items: [{ name: 'Oats', value: '0.3' }, { name: 'Milk', value: '0.25' }], needs: [{ name: 'Calories', min: '600', use: ['150', '120'] }] }, 1.2],
+            assign: [{ rowsList: [{ name: 'Ana' }, { name: 'Ben' }], colsList: [{ name: 'Cook' }, { name: 'Clean' }], matrix: [['5', '9'], ['4', '2']] }, 7],
+            ship: [{ rowsList: [{ name: 'A', value: '20' }, { name: 'B', value: '30' }], colsList: [{ name: 'X', value: '10' }, { name: 'Y', value: '25' }, { name: 'Z', value: '15' }], matrix: [['8', '6', '10'], ['9', '12', '13']] }, 465]
+          };
+          const bad = [];
+          for (const k of Object.keys(want)) {
+            const [data, obj] = want[k];
+            const b = E.buildFromRecipe(k, data);
+            if (!b.model || b.problems.length) { bad.push(k + ': ' + b.problems.join('; ')); continue; }
+            const r = E.solve(b.model, {});
+            if (!['optimal', 'feasible'].includes(r.status) || (obj != null && !close(r.objective, obj, 1e-4))) bad.push(k + ': ' + fmt(r));
+          }
+          const broken = E.buildFromRecipe('produce', { items: [{ name: 'A', value: 'abc' }] });
+          if (!broken.problems.length) bad.push('no problems reported for bad input');
+          return !bad.length || bad.join('\n');
+        }
+      },
+      {
+        name: 'v3 · Unknown names carry a quick fix', run() {
+          const C = E.compile(M({ sense: 'max', expr: '3*chairs + pricee' }, [V('chairs')], [], [P('price', '4')]));
+          const f = C.errors.goal && C.errors.goal.fix;
+          return (f && f.kind === 'unknown' && f.name === 'pricee' && f.suggest === 'price') || JSON.stringify(C.errors.goal);
+        }
       }
     ];
   }

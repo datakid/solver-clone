@@ -128,7 +128,7 @@
     const m = build(t);
     S.replace(m);
     N.Drawer && N.Drawer.close();
-    if (!o.quiet) N.toast(`${t.name} template loaded`, { kind: 'info', action: { label: 'Solve', run: () => N.Solve.run() } });
+    if (!o.quiet) N.toast(`${t.name} example loaded — press Solve to see the best plan`, { kind: 'info' });
   }
 
   N.Templates = { list, build, open };

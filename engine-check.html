@@ -14,11 +14,7 @@
 <script src="js/engine/solve.js"></script>
 <script src="js/engine/text.js"></script>
 <script src="js/engine/explain.js"></script>
+<script src="js/engine/guide.js"></script>
 <script src="js/engine/tests.js"></script>
-<script>
-  const res = Engine.runTests();
-  const lines = res.map((r) => (r.ok ? 'PASS ' : 'FAIL ') + r.name + ' (' + r.ms + 'ms)' + (r.ok ? '' : '\n   ' + r.detail));
-  document.getElementById('out').textContent = lines.join('\n');
-  console.log(lines.join('\n'));
-</script>
+<script src="js/engine-check.js"></script>
 </body></html>

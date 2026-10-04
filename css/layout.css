@@ -266,8 +266,8 @@
 
 .sheet-handle { display: none; }
 
-@media (max-width: 1180px) {
-  .app-main { grid-template-columns: minmax(480px, 1fr) minmax(340px, 410px); gap: 20px; padding: 22px 20px; }
+@media (max-width: 1280px) {
+  .app-main { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); gap: 20px; padding: 22px 20px; }
   .var-row { grid-template-columns: 20px minmax(80px, 1fr) 56px auto 28px 28px; }
   .var-row .bounds { grid-column: 2 / -1; grid-row: 2; }
   .var-head { display: none; }
@@ -276,8 +276,8 @@
   .rule-row { grid-template-columns: 20px 32px 110px minmax(140px, 1fr) auto 28px; }
   .rule-meta, .rule-says { padding-left: 176px; }
 }
-@media (max-width: 960px) {
-  .app-main { grid-template-columns: 1fr; padding: 18px 16px 130px; }
+@media (max-width: 1100px) {
+  .app-main { grid-template-columns: minmax(0, 1fr); padding: 18px 16px 130px; max-width: 860px; }
   .results-col {
     position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; max-height: 84vh; padding: 0;
     transform: translateY(calc(100% - 64px)); transition: transform 340ms var(--ease-out);
@@ -292,6 +292,7 @@
   .results-col.is-empty ~ .solve-dock, body.sheet-closed .solve-dock { bottom: 20px; }
   .rule-row { grid-template-columns: 20px 32px 120px minmax(140px, 1fr) auto 28px; }
   .rule-meta, .rule-says { padding-left: 186px; }
+  .results-col > .card { max-width: 860px; margin: 0 auto; }
 }
 @media (max-width: 720px) {
   .app-header { height: 56px; }
