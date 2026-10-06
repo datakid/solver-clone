@@ -55,11 +55,13 @@
     inner.append(brand, h('span', { class: 'header-sep' }), h('div', { class: 'model-name-wrap' }, name, state), actions);
     el.append(inner);
     function sync() {
-      if (document.activeElement !== name) name.value = S.model.name;
-      document.title = `${S.model.name} — Nadir`;
+      if (document.activeElement !== name && name.value !== S.model.name) name.value = S.model.name;
+      const t = `${S.model.name} — Nadir`;
+      if (document.title !== t) document.title = t;
     }
     function syncState() {
       const st = S.saveState();
+      if (state.dataset.state === st) return;
       state.dataset.state = st;
       const txt = { saved: 'Saved', dirty: 'Edited', unsaved: 'Unsaved', draft: 'Draft' }[st];
       state.querySelector('.save-text').textContent = txt;
@@ -67,7 +69,8 @@
     }
     S.on('model', sync);
     S.on('name', sync);
-    S.on('dirty', syncState);
+    let stT = 0;
+    S.on('dirty', () => { if (!stT) stT = setTimeout(() => { stT = 0; syncState(); }, 120); });
     S.on('library', syncState);
     sync(); syncState();
     return { syncName: sync };

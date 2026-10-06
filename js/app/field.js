@@ -4,16 +4,20 @@
   const E = window.Engine;
 
   let symbols = () => ({ vars: [], params: [] });
-  const fieldSymbols = (fn) => { symbols = fn; };
+  let symVersion = '';
+  let symSets = null;
+  const fieldSymbols = (fn, sig) => { symbols = fn; if (sig !== symVersion || sig == null) { symVersion = sig == null ? String(Math.random()) : sig; symSets = null; } };
+  const sets = () => {
+    if (!symSets) { const sym = symbols(); symSets = { vars: new Set(sym.vars.map((v) => v.name)), params: new Set(sym.params.map((p) => p.name)) }; }
+    return symSets;
+  };
 
   function highlightHTML(src, err, rule) {
     const n = src.length;
     if (!n) return '';
     const cls = new Array(n).fill('');
     const spans = E.highlight(src);
-    const sym = symbols();
-    const vars = new Set(sym.vars.map((v) => v.name));
-    const params = new Set(sym.params.map((p) => p.name));
+    const { vars, params } = sets();
     spans.forEach((s, i) => {
       let c = '';
       if (s.type === 'num') c = 'tk-num';
@@ -21,7 +25,7 @@
       else if (s.type === 'op') c = ['<=', '>=', '=', '<', '>'].includes(s.value) ? 'tk-cmp' : 'tk-op';
       else if (s.type === 'name') {
         if (rule && i === 0 && spans[1] && spans[1].type === 'op' && spans[1].value === ':') c = 'tk-label';
-        else if (s.callee || (E.FUNCTIONS[s.value] && !vars.has(s.value))) c = 'tk-fn';
+        else if (s.callee || (E.FUNCTIONS[s.value] && !vars.has(s.value) && !params.has(s.value))) c = 'tk-fn';
         else if (vars.has(s.value)) c = 'tk-var';
         else if (params.has(s.value)) c = 'tk-param';
       }
@@ -69,11 +73,17 @@
       wrap.append(assistEl);
     }
     let err = null;
+    let painted = null;
     const paint = () => {
-      inner.innerHTML = highlightHTML(input.value, err, o.kind === 'rule') + '&#8203;';
+      const key = input.value + '\u0000' + (err ? err.start + ':' + err.end : '') + '\u0000' + symVersion;
+      if (key !== painted) {
+        painted = key;
+        inner.innerHTML = highlightHTML(input.value, err, o.kind === 'rule') + '&#8203;';
+      }
       sync();
     };
-    const sync = () => { inner.style.transform = input.scrollLeft ? `translateX(${-input.scrollLeft}px)` : ''; };
+    let shift = 0;
+    const sync = () => { const s = input.scrollLeft; if (s !== shift) { shift = s; inner.style.transform = s ? `translateX(${-s}px)` : ''; } };
 
     input.addEventListener('input', () => {
       paint();
@@ -102,7 +112,7 @@
       setError(e) {
         const next = e ? { start: e.start, end: e.end } : null;
         const same = (!next && !err) || (next && err && next.start === err.start && next.end === err.end);
-        wrap.classList.toggle('is-invalid', !!e);
+        if (wrap.classList.contains('is-invalid') !== !!e) wrap.classList.toggle('is-invalid', !!e);
         err = next;
         if (!same) paint();
       },

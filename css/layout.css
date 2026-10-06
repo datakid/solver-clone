@@ -79,12 +79,13 @@
 .res-ready > .btn-primary { margin-top: 6px; }
 
 .res { padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 20px; }
-.res > * { animation: fade-up 360ms var(--ease-out) both; }
-.res > *:nth-child(2) { animation-delay: 30ms; }
-.res > *:nth-child(3) { animation-delay: 70ms; }
-.res > *:nth-child(4) { animation-delay: 110ms; }
-.res > *:nth-child(5) { animation-delay: 150ms; }
-.res > *:nth-child(n+6) { animation-delay: 190ms; }
+.res > * { animation: fade-in 200ms var(--ease) both; }
+.res.is-enter > * { animation: fade-up 360ms var(--ease-out) both; }
+.res.is-enter > *:nth-child(2) { animation-delay: 30ms; }
+.res.is-enter > *:nth-child(3) { animation-delay: 70ms; }
+.res.is-enter > *:nth-child(4) { animation-delay: 110ms; }
+.res.is-enter > *:nth-child(5) { animation-delay: 150ms; }
+.res.is-enter > *:nth-child(n+6) { animation-delay: 190ms; }
 .res.is-running > * { animation: none; }
 .res-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .status-badge { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px 0 9px; border-radius: var(--r-pill); background: var(--surface-2); }

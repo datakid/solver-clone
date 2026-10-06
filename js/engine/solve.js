@@ -6,7 +6,7 @@ NadirEngine.define('solve', function (E) {
     balanced: { label: 'Balanced', tol: 1e-8, timeLimit: 10, multistart: 4, gap: 0.0001, patience: 150 },
     thorough: { label: 'Thorough', tol: 1e-10, timeLimit: 60, multistart: 16, gap: 0, patience: 400 }
   };
-  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true, lpMethod: 'auto', presolve: true, cuts: true, ranging: true }, PRESETS.balanced);
+  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true, lpMethod: 'auto', presolve: true, cuts: true, ranging: true, reform: true }, PRESETS.balanced);
 
   function resolveSettings(s) {
     const out = Object.assign({}, DEFAULTS, s || {});
@@ -16,7 +16,8 @@ NadirEngine.define('solve', function (E) {
     }
     out.timeLimit = Math.max(0.05, out.timeLimit);
     out.lpMethod = ['auto', 'revised', 'dense'].includes(out.lpMethod) ? out.lpMethod : 'auto';
-    for (const k of ['presolve', 'cuts', 'ranging']) out[k] = out[k] !== false && out[k] !== 'false';
+    for (const k of ['presolve', 'cuts', 'ranging', 'reform']) out[k] = out[k] !== false && out[k] !== 'false';
+    if (out.warm && !Array.isArray(out.warm)) out.warm = null;
     out.multistart = Math.max(1, Math.round(out.multistart));
     return out;
   }
@@ -27,10 +28,11 @@ NadirEngine.define('solve', function (E) {
     return idx;
   }
 
-  function analyze(C) {
+  function analyze(C, settings) {
     const rowsIdx = enabledRows(C);
     const roots = [C.goalRoot].concat(rowsIdx.map((i) => C.rows[i].g));
-    const lin = C.ir.linearize(roots.filter((r) => r >= 0));
+    const linMemo = new Array(C.ir.size);
+    const lin = C.ir.linearize(roots.filter((r) => r >= 0), linMemo);
     const goalLin = C.goalRoot >= 0 ? lin[0] : { m: new Map(), c: 0 };
     const rowLin = C.goalRoot >= 0 ? lin.slice(1) : lin;
     const linear = !!goalLin && rowLin.every((x) => !!x);
@@ -40,16 +42,33 @@ NadirEngine.define('solve', function (E) {
     for (let j = 0; j < C.n; j++) if (C.integer[j]) hasInt = true;
     const nonlinearRules = [];
     rowLin.forEach((x, k) => { if (!x) nonlinearRules.push(C.rows[rowsIdx[k]].cid); });
-    return { rowsIdx, goalLin, rowLin, linear, nonsmooth, hasInt, goalLinear: !!goalLin, nonlinearRules: [...new Set(nonlinearRules)] };
+    const out = { rowsIdx, goalLin, rowLin, linear, nonsmooth, hasInt, goalLinear: !!goalLin, nonlinearRules: [...new Set(nonlinearRules)], reform: null };
+    let kinked = false;
+    for (const r of roots) if (r >= 0 && (C.ir.flags[r] & 4)) kinked = true;
+    out.kinked = kinked;
+    const want = (settings && settings.engine) || 'auto';
+    if (!linear && kinked && !nonsmooth && (!settings || settings.reform !== false) && (want === 'auto' || want === 'simplex') && E.reformulate) {
+      const R = E.reformulate(C, rowsIdx);
+      if (R) {
+        out.reform = R;
+        out.goalLin = R.goalLin;
+        out.rowLin = R.rowLin;
+        out.goalLinear = true;
+        out.pwlRules = out.nonlinearRules;
+        out.nonlinearRules = [];
+      }
+    }
+    return out;
   }
 
   function chooseEngine(A, settings) {
     const want = settings.engine || 'auto';
-    if (want === 'simplex') return A.linear ? (A.hasInt ? 'bb' : 'simplex') : null;
+    const lin = A.linear || !!A.reform;
+    if (want === 'simplex') return lin ? (A.hasInt ? 'bb' : 'simplex') : null;
     if (want === 'nonlinear') return A.hasInt ? 'de' : 'alm';
     if (want === 'evolutionary') return 'de';
-    if (A.linear) return A.hasInt ? 'bb' : 'simplex';
-    if (!A.nonsmooth && !A.hasInt) return 'alm';
+    if (lin) return A.hasInt ? 'bb' : 'simplex';
+    if (!A.nonsmooth && !A.hasInt && !A.kinked) return 'alm';
     return 'de';
   }
 
@@ -76,11 +95,24 @@ NadirEngine.define('solve', function (E) {
         src.push(-1);
       }
     } else {
-      for (const [j, a] of A.goalLin.m) c[j] = a;
+      for (const [j, a] of A.goalLin.m) if (j < C.n) c[j] = a;
       c0 = A.goalLin.c;
     }
-    return { n: C.n, c, c0, rows, src, lower: C.lower, upper: C.upper, maximize, integerHint: C.integer };
+    if (!A.reform) return { n: C.n, c, c0, rows, src, lower: C.lower, upper: C.upper, maximize, integerHint: C.integer, base: C.n };
+    const R = A.reform;
+    const N = C.n + R.nAux;
+    const c2 = new Float64Array(N);
+    c2.set(c);
+    if (C.sense !== 'target') for (const [j, a] of A.goalLin.m) if (j >= C.n) c2[j] = a;
+    const lower = new Float64Array(N).fill(-Infinity), upper = new Float64Array(N).fill(Infinity);
+    lower.set(C.lower); upper.set(C.upper);
+    const hint = new Uint8Array(N);
+    hint.set(C.integer);
+    for (const r of R.rows) { rows.push(r); src.push(-2); }
+    return { n: N, c: c2, c0, rows, src, lower, upper, maximize, integerHint: hint, base: C.n, aux: R.nAux };
   }
+
+  const head = (x, n) => (x && x.length > n ? x.subarray ? x.subarray(0, n) : x.slice(0, n) : x);
 
   function makeNL(C, A, settings) {
     const rowsIdx = A.rowsIdx;
@@ -164,11 +196,12 @@ NadirEngine.define('solve', function (E) {
       groups[byCid.get(cid)].ks.push(k);
     });
     const P0 = buildLP(C, A, true);
-    const targetRow = C.sense === 'target' ? P0.rows.length - 1 : -1;
+    const fixed = [];
+    P0.src.forEach((s, k) => { if (s < 0) fixed.push(P0.rows[k]); });
     const feasible = (keep, freeBounds) => {
       const rows = [];
       keep.forEach((gi) => groups[gi].ks.forEach((k) => rows.push(P0.rows[k])));
-      if (targetRow >= 0) rows.push(P0.rows[targetRow]);
+      for (const r of fixed) rows.push(r);
       const P = { n: P0.n, c: new Float64Array(P0.n), c0: 0, rows, lower: P0.lower, upper: P0.upper, maximize: false };
       if (freeBounds) { P.lower = new Float64Array(P0.n).fill(-Infinity); P.upper = new Float64Array(P0.n).fill(Infinity); }
       const r = E.solveLP(P, { deadline });
@@ -196,8 +229,9 @@ NadirEngine.define('solve', function (E) {
       let N = n;
       const lower = Array.from(P0.lower), upper = Array.from(P0.upper);
       const rows = [], cols = [], cost = [];
-      P0.rows.forEach((r) => {
+      P0.rows.forEach((r, k) => {
         const idx = Array.from(r.idx), val = Array.from(r.val);
+        if (P0.src[k] === -2) { rows.push({ idx, val, op: r.op, rhs: r.rhs }); cols.push([]); return; }
         const w = 1 / Math.max(1, Math.abs(r.rhs));
         const mine = [];
         if (r.op === '<=' || r.op === '=') { idx.push(N); val.push(-1); mine.push([N, 1]); lower.push(0); upper.push(Infinity); cost.push(w); N++; }
@@ -251,6 +285,7 @@ NadirEngine.define('solve', function (E) {
       const BIG = 1e7;
       const lo = Float64Array.from(LP.lower, (v) => Math.max(v, -BIG));
       const hi = Float64Array.from(LP.upper, (v) => Math.min(v, BIG));
+      if (LP.aux) for (let j = C.n; j < LP.n; j++) { lo[j] = -Infinity; hi[j] = Infinity; }
       const r = E.solveLP(Object.assign({}, LP, { lower: lo, upper: hi }), { deadline });
       if (!r.x) return [];
       const out = [];
@@ -328,11 +363,16 @@ NadirEngine.define('solve', function (E) {
       if (!C.rows.some((r) => r.enabled)) return done({ status: 'error', message: 'Write a goal or at least one rule', engine: null });
     }
 
-    const A = analyze(C);
+    const A = analyze(C, settings);
     const engine = chooseEngine(A, settings);
     if (!engine) return done({ status: 'error', message: 'Simplex needs every line to be linear. Switch the engine to Auto.', engine: null, nonlinearRules: A.nonlinearRules });
+    const pwl = A.reform ? { pieces: A.reform.nAux, kinds: A.reform.kinds } : null;
 
     const pack = (status, x, extra) => {
+      x = head(x, C.n);
+      if (extra && extra.reduced) extra.reduced = head(extra.reduced, C.n);
+      if (extra && extra.ranging && !extra.ranging.skipped && pwl) extra.ranging = { skipped: true, reason: 'Sensitivity ranges are not shown for models with abs / max / min — the shadow prices above still apply' };
+      if (extra && extra.ranging && !extra.ranging.skipped && extra.ranging.cols) extra.ranging.cols = extra.ranging.cols.slice(0, C.n);
       const rg = extra && extra.ranging && !extra.ranging.skipped ? extra.ranging : null;
       const rep = x ? rowReport(C, x, A.rowsIdx, extra && extra.duals, rg ? rg.rows : null) : { rows: [], goal: NaN };
       const values = x ? Array.from(x, clean) : null;
@@ -340,9 +380,9 @@ NadirEngine.define('solve', function (E) {
         status, engine, engineLabel: ENGINE_LABEL[engine], objective: x ? clean(rep.goal) : null,
         values, constraints: rep.rows, reducedCosts: extra && extra.reduced ? Array.from(extra.reduced, clean) : null,
         costRanges: rg ? rg.cols.map((c) => ({ inc: clean(c.inc), dec: clean(c.dec) })) : null,
-        objWeights: rg && C.sense !== 'target' ? Array.from(A.goalLin ? (() => { const w = new Array(C.n).fill(0); for (const [j, a] of A.goalLin.m) w[j] = clean(a); return w; })() : []) : null,
+        objWeights: rg && C.sense !== 'target' ? Array.from(A.goalLin ? (() => { const w = new Array(C.n).fill(0); for (const [j, a] of A.goalLin.m) if (j < C.n) w[j] = clean(a); return w; })() : []) : null,
         rangingNote: extra && extra.ranging && extra.ranging.skipped ? extra.ranging.reason : null,
-        iterations: extra && extra.iterations, sense: C.sense, target: C.target
+        iterations: extra && extra.iterations, sense: C.sense, target: C.target, pwl
       }, extra && extra.more));
     };
 
@@ -355,7 +395,7 @@ NadirEngine.define('solve', function (E) {
         if (settings.ranging && C.sense !== 'target' && r.status === 'optimal' && !r.ranging && r.method === 'dense') r.ranging = { skipped: true, reason: 'Ranging needs the revised simplex (switch LP method to Auto)' };
         R.push(r.iterations, r.obj, 0, true);
       } else {
-        const isInt = C.integer;
+        const isInt = LP.integerHint;
         r = E.branchAndBound(LP, isInt, { deadline, nodeLimit: settings.nodeLimit, gap: settings.gap, maxIter: settings.maxIter, presolve: settings.presolve, cuts: settings.cuts, classic: settings.lpMethod === 'dense' }, (ev) => {
           if (ev.incumbent !== undefined) R.push(ev.nodes, ev.incumbent, 0, true);
           else if (post) R.push(ev.nodes, R.history.length ? R.history[R.history.length - 1] : NaN, NaN, false);
@@ -381,15 +421,16 @@ NadirEngine.define('solve', function (E) {
     const { P, dobj } = makeNL(C, A, settings);
     const report = (it, s) => R.push(it, s.f === undefined ? NaN : sign(C, s.f), s.v, false);
     let best, more = {};
+    const warm = warmStart(C, settings.warm);
     if (engine === 'alm') {
-      const ms = E.multistart(P, C.init, { seed: settings.seed, multistart: settings.multistart, tol: settings.tol, deadline, dobj, maxIt: Math.min(settings.maxIter, 5000) }, report);
+      const ms = E.multistart(P, C.init, { seed: settings.seed, multistart: settings.multistart, tol: settings.tol, deadline, dobj, maxIt: Math.min(settings.maxIter, 5000), extra: warm ? [warm] : null }, report);
       best = ms.best;
       more = { starts: ms.starts, inner: ms.iters };
       R.push(ms.iters, sign(C, best.f), best.v, true);
     } else {
       const isInt = C.integer;
       const deBudget = Date.now() + (deadline - Date.now()) * 0.8;
-      const de = E.evolve(P, C.init, isInt, { seed: settings.seed, patience: settings.patience, deadline: deBudget }, report);
+      const de = E.evolve(P, C.init, isInt, { seed: settings.seed, patience: settings.patience, deadline: deBudget, extra: warm ? [warm] : null }, report);
       best = de.best;
       more = { generations: de.gens, population: de.popSize };
       if (!A.nonsmooth || true) {
@@ -432,12 +473,24 @@ NadirEngine.define('solve', function (E) {
       else status = 'optimal';
     }
     if (Date.now() > deadline) more.timedOut = true;
+    if (warm) more.warmStart = true;
     return pack(status, best.x, { iterations: R.iter, more });
   }
 
   function sign(C, f) {
     if (C.sense === 'max') return -f;
     return f;
+  }
+
+  function warmStart(C, w) {
+    if (!w || w.length !== C.n) return null;
+    const x = new Float64Array(C.n);
+    for (let j = 0; j < C.n; j++) {
+      const v = +w[j];
+      if (!Number.isFinite(v)) return null;
+      x[j] = Math.min(C.upper[j], Math.max(C.lower[j], C.integer[j] ? Math.round(v) : v));
+    }
+    return x;
   }
 
   function solve(model, settings, post) {
@@ -452,9 +505,10 @@ NadirEngine.define('solve', function (E) {
   function classify(C, settings) {
     if (C.errorCount || C.n === 0) return null;
     try {
-      const A = analyze(C);
-      const engine = chooseEngine(A, resolveSettings(settings));
-      return { engine, label: engine ? ENGINE_LABEL[engine] : null, linear: A.linear, hasInt: A.hasInt, nonsmooth: A.nonsmooth, nonlinearRules: A.nonlinearRules };
+      const s = resolveSettings(settings);
+      const A = analyze(C, s);
+      const engine = chooseEngine(A, s);
+      return { engine, label: engine ? ENGINE_LABEL[engine] : null, linear: A.linear || !!A.reform, hasInt: A.hasInt, nonsmooth: A.nonsmooth, nonlinearRules: A.nonlinearRules, pwl: !!A.reform, pwlRules: A.pwlRules || [], pieces: A.reform ? A.reform.nAux : 0 };
     } catch (e) { return null; }
   }
 
@@ -489,8 +543,8 @@ NadirEngine.define('solve', function (E) {
     const s = resolveSettings(settings);
     const C = E.compile(model, { nonNegative: s.nonNegative !== false });
     if (C.errorCount) return { error: 'Fix the highlighted lines first' };
-    const A = analyze(C);
-    if (!A.linear) return { error: 'CPLEX .lp export needs a linear model' };
+    const A = analyze(C, s);
+    if (!A.linear && !A.reform) return { error: 'CPLEX .lp export needs a linear model' };
     const LP = buildLP(C, A, true);
     const names = [];
     C.vars.forEach((v) => {
@@ -500,6 +554,7 @@ NadirEngine.define('solve', function (E) {
         else names.push(sanitize(`${v.name}_${i + 1}`));
       }
     });
+    for (let j = C.n; j < LP.n; j++) names.push('aux_' + (j - C.n + 1));
     const num = (x) => {
       const r = Math.round(x);
       if (Math.abs(x - r) < 1e-12) return String(r);
@@ -534,15 +589,15 @@ NadirEngine.define('solve', function (E) {
     const used = new Set();
     LP.rows.forEach((r, k) => {
       const ri = LP.src[k];
-      let nm = ri >= 0 ? sanitize(E.rowName(C.rows[ri], C.ruleInfo[C.rows[ri].cid])) : 'target';
+      let nm = ri >= 0 ? sanitize(E.rowName(C.rows[ri], C.ruleInfo[C.rows[ri].cid])) : ri === -2 ? 'piece' : 'target';
       while (used.has(nm)) nm += '_';
       used.add(nm);
       const op = r.op === '=' ? '=' : r.op;
       L.push(wrap(' ' + nm + ': ' + expr(r.idx, r.val) + ' ' + op + ' ' + num(r.rhs)));
     });
     L.push('Bounds');
-    for (let j = 0; j < C.n; j++) {
-      const lo = C.lower[j], hi = C.upper[j];
+    for (let j = 0; j < LP.n; j++) {
+      const lo = LP.lower[j], hi = LP.upper[j];
       if (lo === -Infinity && hi === Infinity) L.push(' ' + names[j] + ' free');
       else if (lo === hi) L.push(' ' + names[j] + ' = ' + num(lo));
       else {
@@ -573,8 +628,10 @@ NadirEngine.define('solve', function (E) {
 
   function sweep(model, settings, param, values, post, onStep) {
     const out = [];
+    let warm = settings && settings.warm || null;
     for (let i = 0; i < values.length; i++) {
-      const r = solve(withParam(model, param, values[i]), Object.assign({}, settings, { timeLimit: Math.min(resolveSettings(settings).timeLimit, 5) }), null);
+      const r = solve(withParam(model, param, values[i]), Object.assign({}, settings, { timeLimit: Math.min(resolveSettings(settings).timeLimit, 5), warm }), null);
+      if (r.values && (r.status === 'optimal' || r.status === 'feasible')) warm = r.values;
       const step = { i, param: values[i], status: r.status, objective: r.objective, values: r.values, ms: r.ms };
       out.push(step);
       if (onStep) onStep(step);
@@ -613,4 +670,5 @@ NadirEngine.define('solve', function (E) {
   E.workerMain = workerMain;
   E.ENGINE_LABEL = ENGINE_LABEL;
   E.cleanNumber = clean;
+  E.analyzeModel = analyze;
 });

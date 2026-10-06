@@ -5,6 +5,7 @@
 
   let scheduled = 0;
   let lastMs = 0;
+  let symCache = null, symSig = '';
 
   function run() {
     scheduled = 0;
@@ -22,11 +23,21 @@
     S.compiled = C;
     S.live = { check, cls, errors: C.errors, errorCount: C.errorCount };
     lastMs = performance.now() - t0;
-    N.Field.setSymbols(symbols);
+    symCache = null;
+    const sym = symbols();
+    const sig = sym.vars.map((v) => v.name).join(',') + '|' + sym.params.map((p) => p.name).join(',');
+    N.Field.setSymbols(symbols, sig);
     S.emit('live', S.live);
+    if (sig !== symSig) { symSig = sig; S.emit('symbols'); }
   }
 
   function symbols() {
+    if (symCache) return symCache;
+    symCache = buildSymbols();
+    return symCache;
+  }
+
+  function buildSymbols() {
     const C = S.compiled;
     const vars = [], params = [];
     if (C) {

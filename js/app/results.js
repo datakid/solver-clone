@@ -1,6 +1,6 @@
 (function (N) {
   'use strict';
-  const { h, icon, esc, fmt, keys, LOGO, VALLEY, plural, joinWords, countUp } = N.util;
+  const { h, icon, esc, fmt, keys, LOGO, VALLEY, plural, joinWords, countUp, patch } = N.util;
   const S = N.Store;
   const E = window.Engine;
 
@@ -91,6 +91,17 @@
     card.append(handle, h('div', { class: 'print-title' }, ''), body);
     root.append(card);
     let chart = null, chartMeta = null, liveStatus = null, showAllVars = false, showAllRows = false, emptyKind = '', animated = null;
+    const actions = new Map();
+    let actSeq = 0;
+    const act = (el, fn) => { const k = 'a' + (actSeq++); actions.set(k, fn); el.dataset.act = k; return el; };
+    body.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-act]');
+      if (!t || !body.contains(t)) return;
+      const fn = actions.get(t.dataset.act);
+      if (fn) fn(e, t);
+    });
+    const chartCanvas = h('canvas', { role: 'img', 'aria-label': 'Objective by iteration', 'data-morph': 'keep', 'data-key': 'chart-canvas' });
+    let readyKey = '';
 
     function welcome() {
       const box = h('div', { class: 'res-empty res-welcome' });
@@ -99,24 +110,24 @@
         `<p>How many to make, where to spend, who does what. Describe your situation and Nadir works out the best plan, then explains it in plain words.</p>`;
       const hero = h('button', { class: 'welcome-wizard', type: 'button', id: 'welcome-wizard' });
       hero.innerHTML = `<span class="welcome-wizard-ic">${icon('sparkle')}</span><span class="welcome-wizard-txt"><strong>Set up with simple questions</strong><span>Pick a situation, fill in a small table — Nadir writes the model for you.</span></span>${icon('arrowRight', 'icon-sm')}`;
-      hero.addEventListener('click', () => N.Wizard.open());
+      act(hero, () => N.Wizard.open());
       const ctas = h('div', { class: 'welcome-ctas' });
       const tour = h('button', { class: 'btn btn-outline btn-sm', type: 'button', html: icon('compass', 'icon-sm') + 'Show me around (1 min)' });
-      tour.addEventListener('click', () => N.Tour.start());
+      act(tour, () => N.Tour.start());
       const scratch = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', html: icon('edit', 'icon-sm') + 'Write it myself' });
-      scratch.addEventListener('click', () => N.App.decide.add());
+      act(scratch, () => N.App.decide.add());
       ctas.append(tour, scratch);
       box.append(hero, ctas, h('div', { class: 'welcome-divider' }, h('span', null, 'or open a ready-made example')));
       const grid = h('div', { class: 'template-grid' });
       N.Templates.list.slice(0, 6).forEach((t, i) => {
         const b = h('button', { class: 'template-card', type: 'button', style: { '--i': i } });
         b.innerHTML = `<span class="template-ic">${icon(TEMPLATE_ICON(t), 'icon-sm')}</span><strong>${esc(t.name)}<span class="chip">${esc(t.kind)}</span></strong><span>${esc(t.blurb || t.note[0])}</span>`;
-        b.addEventListener('click', () => N.Templates.open(t.key));
+        act(b, () => N.Templates.open(t.key));
         grid.append(b);
       });
       box.append(grid);
       const more = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', html: 'All templates' + icon('arrowRight', 'icon-xs') });
-      more.addEventListener('click', () => N.Drawer.open('templates'));
+      act(more, () => N.Drawer.open('templates'));
       box.append(more);
       return box;
     }
@@ -125,7 +136,7 @@
       const L = S.live;
       const e = L ? L.errors : { vars: {}, rules: {}, params: {} };
       const m = S.model;
-      const box = h('div', { class: 'res-empty res-ready' });
+      const box = h('div', { class: 'res-empty res-ready', 'data-key': 'ready' });
       const errs = L ? L.errorCount : 0;
       const goalBlank = E.isBlank(m.goal.expr);
       const goalOk = !goalBlank && !e.goal && !(m.goal.sense === 'target' && (e.target || String(m.goal.target == null ? '' : m.goal.target).trim() === ''));
@@ -145,16 +156,16 @@
       else items.push({ st: 'opt', t: 'No limits yet', d: 'Optional — but without limits, “more” is usually unlimited.', act: ['Add a limit', () => N.App.rules.add()] });
       if (errs) items.push({ st: 'bad', t: `${plural(errs, 'line')} to fix`, d: 'The red underline shows exactly where.', act: ['Show me', () => N.Solve.focusFirstError()] });
       const ready = !errs && nV > 0 && (goalOk || (goalBlank && nR > 0));
-      box.innerHTML = `<div class="res-empty-mark${ready ? ' is-ready' : ''}">${LOGO}</div><h3>${ready ? 'Ready to solve' : 'Almost there'}</h3>` +
+      box.innerHTML = `<div class="res-empty-mark${ready ? ' is-ready' : ''}" data-morph="keep" data-key="mark">${LOGO}</div><h3>${ready ? 'Ready to solve' : 'Almost there'}</h3>` +
         `<p>${ready ? `Press the button below or ${keys('Mod+Enter')}. Nadir picks the right method for you.` : 'A few things before Nadir can solve:'}</p>`;
       const list = h('ul', { class: 'ready-list' });
       items.forEach((it) => {
-        const li = h('li', { class: 'ready-item is-' + it.st });
+        const li = h('li', { class: 'ready-item is-' + it.st, 'data-key': 'ri-' + it.t.replace(/^[\d,]+ /, '#') });
         const ic = { ok: 'check', warn: 'info', todo: 'dot', opt: 'dot', bad: 'alert' }[it.st];
         li.innerHTML = `<span class="ready-ic">${icon(ic, 'icon-xs')}</span><span class="ready-txt"><strong>${esc(it.t)}</strong>${it.d ? `<span>${esc(it.d)}</span>` : ''}</span>`;
         if (it.act) {
           const b = h('button', { class: 'btn btn-soft btn-sm', type: 'button' }, it.act[0]);
-          b.addEventListener('click', it.act[1]);
+          act(b, it.act[1]);
           li.append(b);
         }
         list.append(li);
@@ -163,16 +174,16 @@
       const cls = L && L.cls;
       if (ready) {
         const go = h('button', { class: 'btn btn-primary btn-lg', type: 'button', html: icon('play', 'icon-sm') + 'Find the best answer' });
-        go.addEventListener('click', () => N.Solve.run());
+        act(go, () => N.Solve.run());
         box.append(go);
       }
       if (ready && cls && cls.label) {
-        const kind = cls.linear ? (cls.hasInt ? 'straight-line formulas with whole numbers' : 'straight-line formulas') : cls.nonsmooth ? 'formulas with jumps' : 'curved formulas';
-        box.append(h('p', { class: 'ready-engine', html: `${icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs')}Your model uses ${esc(kind)} — Nadir will use <strong>${esc(cls.label)}</strong>.` }));
+        const kind = cls.pwl ? `straight lines with corners (abs / max / min)${cls.hasInt ? ' and whole numbers' : ''}` : cls.linear ? (cls.hasInt ? 'straight-line formulas with whole numbers' : 'straight-line formulas') : cls.nonsmooth ? 'formulas with jumps' : 'curved formulas';
+        box.append(h('p', { class: 'ready-engine', html: `${icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs')}Your model uses ${esc(kind)} — Nadir will use <strong>${esc(cls.label)}</strong>${cls.pwl ? ' and prove the very best answer' : ''}.` }));
       }
       if (!ready && !nV && !nR) {
         const wz = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('sparkle', 'icon-xs') + 'Use guided setup instead' });
-        wz.addEventListener('click', () => N.Wizard.open());
+        act(wz, () => N.Wizard.open());
         box.append(wz);
       }
       return box;
@@ -186,16 +197,30 @@
     function empty() {
       root.classList.add('is-empty');
       const blank = S.isBlank();
-      const box = blank ? welcome() : readiness();
-      emptyKind = blank ? 'welcome' : 'ready';
       root.classList.toggle('is-welcome', blank);
-      body.replaceChildren(box);
       chart = null;
+      if (blank) {
+        if (emptyKind === 'welcome') return;
+        emptyKind = 'welcome';
+        readyKey = '';
+        actions.clear();
+        body.replaceChildren(welcome());
+        return;
+      }
+      const L = S.live;
+      const key = JSON.stringify([L && L.errorCount, L && L.errors && Object.keys(L.errors.vars || {}).length, !!(L && L.errors && L.errors.goal), S.model.goal.sense, S.model.goal.expr, S.model.goal.target, S.model.variables.length, S.model.constraints.length, L && L.cls && L.cls.label, L && L.cls && L.cls.pwl, S.compiled && S.compiled.n, S.settings.explain]);
+      if (emptyKind === 'ready' && key === readyKey) return;
+      const fresh = emptyKind !== 'ready';
+      emptyKind = 'ready';
+      readyKey = key;
+      actions.clear();
+      const box = readiness();
+      if (fresh) body.replaceChildren(box); else patch(body, box);
     }
 
     function statusLine(r, running) {
       const st = STATUS[running ? 'running' : r.status] || STATUS.error;
-      const el = h('div', { class: 'res-status ' + st.cls });
+      const el = h('div', { class: 'res-status ' + st.cls, 'data-key': 'status' });
       const meta = h('span', { class: 'muted res-meta' });
       el.append(h('span', { class: 'status-badge', 'data-tip': 'Technical term: ' + st.tech }, h('span', { class: 'dot' }), h('strong', null, st.word)), h('span', { class: 'status-say' }, st.say), meta);
       return { el, meta };
@@ -206,6 +231,7 @@
       if (r.engineLabel) bits.push(r.engineLabel);
       if (r.ms != null) bits.push(r.ms < 1 ? '<1 ms' : r.ms < 1000 ? `${Math.round(r.ms)} ms` : `${(r.ms / 1000).toFixed(r.ms < 10000 ? 2 : 1)} s`);
       if (r.engine === 'simplex' && r.pivots != null) bits.push(`${fmt(r.pivots)} ${r.pivots === 1 ? 'pivot' : 'pivots'}`);
+      if (r.pwl && r.pwl.pieces) bits.push(`${fmt(r.pwl.pieces)} corner ${r.pwl.pieces === 1 ? 'piece' : 'pieces'} linearized`);
       if (r.engine === 'bb' && r.nodes != null) bits.push(`${fmt(r.nodes)} nodes`);
       if (r.engine === 'alm' && r.starts) bits.push(`${r.starts} ${r.starts === 1 ? 'start' : 'starts'}`);
       if (r.engine === 'de' && r.generations) bits.push(`${fmt(r.generations)} generations`);
@@ -233,7 +259,7 @@
       if (!S.settings.explain) return null;
       if (!(r.status === 'optimal' || r.status === 'feasible') || !r.values) return null;
       const sense = r.sense || S.model.goal.sense;
-      const sec = h('section', { class: 'res-story' });
+      const sec = h('section', { class: 'res-story', 'data-key': 'story' });
       sec.append(h('header', null, h('span', { class: 'story-ic', html: icon('sparkle', 'icon-sm') }), h('h3', null, 'In plain words')));
       const P = [];
       const nz = [];
@@ -286,6 +312,12 @@
             : `Biggest lever: one more unit of room in <strong>${esc(nm)}</strong> would ${sense === 'min' ? 'cut' : 'add'} about <strong class="num">${amt}</strong> ${sense === 'min' ? 'from' : 'to'} the goal.${valid}`);
         }
       }
+      if (r.pwl && r.pwl.pieces) {
+        const k = r.pwl.kinds || {};
+        const what = joinWords([k.abs ? 'abs' : '', k.max ? 'max' : '', k.min ? 'min' : ''].filter(Boolean).map((x) => `<span class="mono">${x}()</span>`));
+        P.push(`<span class="faint">Your ${what || 'corner'} formulas were rewritten as straight lines, so ${r.engine === 'bb' ? 'Branch & Bound' : 'Simplex'} could prove this is the very best answer — not just a good one.</span>`);
+      }
+      if (r.warmStart) P.push('<span class="faint">Started from the previous answer to get here faster.</span>');
       if (r.engine === 'alm') P.push(`<span class="faint">Nonlinear models can have more than one valley; Nadir compared ${plural(r.starts || 1, 'starting point')} and kept the best.</span>`);
       if (r.engine === 'de') P.push(`<span class="faint">Found by an evolutionary search over ${plural(r.generations || 0, 'generation')}${r.polished ? ', then polished' : ''}.</span>`);
       if (r.engine === 'bb' && r.mip && (r.mip.cuts || (r.mip.presolve && (r.mip.presolve.rowsRemoved || r.mip.presolve.boundsTightened)))) {
@@ -304,11 +336,11 @@
     }
 
     function decisions(r) {
-      const sec = h('section', { class: 'res-section' });
+      const sec = h('section', { class: 'res-section', 'data-key': 'plan' });
       const adv = S.ui.showAdvancedResults;
       const head = h('header', null, h('h3', { class: 'label-caps' }, 'The plan'));
       const advBtn = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'aria-pressed': String(adv), 'data-tip': 'For experts: reduced costs, shadow prices and sensitivity ranges' }, adv ? 'Hide expert details' : 'Expert details');
-      advBtn.addEventListener('click', () => { S.saveUI({ showAdvancedResults: !S.ui.showAdvancedResults }); render(); });
+      act(advBtn, () => { S.saveUI({ showAdvancedResults: !S.ui.showAdvancedResults }); render(); });
       head.append(advBtn);
       sec.append(head);
       const tbl = h('table', { class: 'res-table' });
@@ -336,9 +368,9 @@
           const atEdge = Math.abs(x - (Number.isFinite(lo) ? lo : hi)) < 1e-9;
           bar = `<span class="bound-bar is-open${atEdge ? ' is-edge' : ''}" data-tip="${Number.isFinite(lo) ? '≥ ' + esc(fmt(lo)) : '≤ ' + esc(fmt(hi))}"><i style="left:${Number.isFinite(lo) ? (atEdge ? 0 : 50) : (atEdge ? 100 : 50)}%"></i></span>`;
         }
-        const tr = h('tr', { class: 'is-link' + (Math.abs(x) < 1e-9 ? ' is-zero' : ''), dataset: { var: v.id } });
+        const tr = h('tr', { class: 'is-link' + (Math.abs(x) < 1e-9 ? ' is-zero' : ''), dataset: { var: v.id, key: 'v' + j } });
         tr.innerHTML = `<td class="nm">${valueLabel(v, i)}</td><td class="num keep">${esc(fmt(x))}</td><td class="num">${bar}</td>${hasRC ? `<td class="num">${esc(fmt(r.reducedCosts[j]))}</td>` : ''}`;
-        tr.addEventListener('click', () => N.App.decide.focusRow(v.id));
+        act(tr, () => N.App.decide.focusRow(v.id));
         tb.append(tr);
         count++;
       }
@@ -348,7 +380,7 @@
       if (hidden > 0) {
         const m = h('div', { class: 'more-rows' }, nonzeroFirst && !showAllVars ? `Showing ${fmt(count)} nonzero of ${fmt(total)}` : `${fmt(hidden)} more`);
         const b = h('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Show all');
-        b.addEventListener('click', () => { showAllVars = true; render(); });
+        act(b, () => { showAllVars = true; render(); });
         m.append(b);
         sec.append(m);
       }
@@ -359,7 +391,7 @@
       if (!r.constraints || !r.constraints.length) return null;
       const adv = S.ui.showAdvancedResults;
       const hasDual = adv && r.constraints.some((c) => c.dual != null);
-      const sec = h('section', { class: 'res-section' });
+      const sec = h('section', { class: 'res-section', 'data-key': 'limits' });
       sec.append(h('header', null, h('h3', { class: 'label-caps' }, 'Limits')));
       const tbl = h('table', { class: 'res-table' });
       tbl.innerHTML = `<thead><tr><th>Limit</th><th class="num" data-tip="The left side of the limit, with the best plan (technical: LHS)">Used</th><th class="num" data-tip="The right side of the limit (technical: RHS)">Allowed</th><th class="num" data-tip="Room left before the limit bites (technical: slack)">Spare</th><th><span class="sr-only">State</span></th>${hasDual ? '<th class="num" data-tip="Change in goal per unit of RHS (shadow price)">Worth</th>' : ''}</tr></thead>`;
@@ -368,11 +400,11 @@
       let list = r.constraints;
       if (list.length > LIMIT && !showAllRows) list = list.filter((c) => c.binding || !c.ok).slice(0, LIMIT);
       for (const c of list) {
-        const tr = h('tr', { class: 'is-link' });
+        const tr = h('tr', { class: 'is-link', 'data-key': 'r' + c.row });
         const opSym = c.op === '<=' ? '≤' : c.op === '>=' ? '≥' : '=';
         const badge = !c.ok ? '<span class="badge-off">broken</span>' : c.binding && c.op !== '=' ? '<span class="badge-binding" data-tip="Used up completely (technical: binding). Loosen it to improve the goal.">used up</span>' : '';
         tr.innerHTML = `<td class="nm" title="${esc(opSym)}">${esc(c.label)}</td><td class="num">${esc(fmt(c.lhs))}</td><td class="num">${esc(fmt(c.rhs))}</td><td class="num">${c.op === '=' ? '' : esc(fmt(c.slack))}</td><td>${badge}</td>${hasDual ? `<td class="num">${c.dual == null ? '' : esc(fmt(c.dual))}</td>` : ''}`;
-        tr.addEventListener('click', () => N.App.rules.focusRow(c.id));
+        act(tr, () => N.App.rules.focusRow(c.id));
         tb.append(tr);
       }
       tbl.append(tb);
@@ -380,7 +412,7 @@
       if (list.length < r.constraints.length) {
         const m = h('div', { class: 'more-rows' }, `Showing binding rules · ${fmt(r.constraints.length)} in total`);
         const b = h('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Show all');
-        b.addEventListener('click', () => { showAllRows = true; render(); });
+        act(b, () => { showAllRows = true; render(); });
         m.append(b);
         sec.append(m);
       }
@@ -389,7 +421,7 @@
 
     function diagnosis(r) {
       const d = r.diagnosis;
-      const box = h('div', { class: 'diag-box', role: 'alert' });
+      const box = h('div', { class: 'diag-box', role: 'alert', 'data-key': 'diag' });
       const byId = ruleNames();
       if (!d) { box.innerHTML = `<h4>${icon('alert', 'icon-sm')}No solution satisfies every rule</h4>`; return box; }
       if (d.kind === 'integer' || d.kind === 'bounds') {
@@ -413,7 +445,7 @@
           const rule = S.model.constraints.find((c) => c.id === f.id);
           if (rule && canPatch(rule.expr)) {
             const ap = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('check', 'icon-xs') + 'Apply & re-solve' });
-            ap.addEventListener('click', () => {
+            act(ap, () => {
               S.edit(() => { rule.expr = rule.expr.replace(/\s+$/, '') + (f.dir > 0 ? ' + ' : ' - ') + N.util.fmt.plain(amt); }, { undo: true });
               N.toast(`Loosened ${nm}`, { action: { label: 'Undo', run: () => S.undo() } });
               setTimeout(() => N.Solve.run(), 30);
@@ -422,7 +454,7 @@
           }
           if (rule) {
             const off = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'data-tip': 'Switch this limit off and solve without it' }, 'Pause it');
-            off.addEventListener('click', () => { S.edit(() => { rule.enabled = false; }, { undo: true }); setTimeout(() => N.Solve.run(), 30); });
+            act(off, () => { S.edit(() => { rule.enabled = false; }, { undo: true }); setTimeout(() => N.Solve.run(), 30); });
             row.append(off);
           }
           list.append(row);
@@ -433,7 +465,7 @@
       d.rules.forEach((id) => {
         if (!byId.has(id)) return;
         const b = h('button', { type: 'button', html: icon('arrowRight', 'icon-xs') + esc(byId.get(id)) });
-        b.addEventListener('click', () => N.App.rules.focusRow(id));
+        act(b, () => N.App.rules.focusRow(id));
         chips.append(b);
       });
       box.append(chips);
@@ -447,10 +479,9 @@
     }
 
     function sensitivity(r) {
-      const sec = h('details', { class: 'res-section res-details res-sensitivity' });
+      const sec = h('details', { class: 'res-section res-details res-sensitivity', 'data-key': 'sens' });
       sec.open = S.ui.showSensitivity !== false;
       sec.append(h('summary', null, h('h3', { class: 'label-caps' }, 'Sensitivity'), h('span', { class: 'faint res-details-sub' }, 'how far numbers can move before the plan changes'), h('span', { class: 'summary-chev', html: icon('chevronDown', 'icon-xs') })));
-      sec.addEventListener('toggle', () => S.saveUI({ showSensitivity: sec.open }));
       if (r.rangingNote) { sec.append(h('p', { class: 'field-hint' }, r.rangingNote)); return sec; }
       const sense = r.sense || S.model.goal.sense;
       const rows = (r.constraints || []).filter((c) => c.range);
@@ -463,7 +494,7 @@
           const hi = c.range.inc === Infinity ? Infinity : c.rhs + c.range.inc;
           const tr = h('tr', { class: 'is-link' });
           tr.innerHTML = `<td class="nm">${esc(c.label)}</td><td class="num">${esc(fmt(c.rhs))}</td><td class="num">${c.dual == null ? '' : esc(fmt(c.dual))}</td><td class="num sens-range"><span>${esc(fmt(lo))}</span><i></i><span>${esc(fmt(hi))}</span></td>`;
-          tr.addEventListener('click', () => N.App.rules.focusRow(c.id));
+          act(tr, () => N.App.rules.focusRow(c.id));
           tb.append(tr);
         });
         t.append(tb);
@@ -481,7 +512,7 @@
             const tr = h('tr', { class: 'is-link' + (Math.abs(r.values[j]) < 1e-9 ? ' is-zero' : '') });
             const w = r.objWeights ? r.objWeights[j] : null;
             tr.innerHTML = `<td class="nm">${valueLabel(v, i)}</td><td class="num">${w == null ? '' : esc(fmt(w))}</td><td class="num sens-range"><span>${w == null ? '−' + esc(rangeTxt(cr.dec)) : esc(fmt(cr.dec === Infinity ? -Infinity : w - cr.dec))}</span><i></i><span>${w == null ? '+' + esc(rangeTxt(cr.inc)) : esc(fmt(cr.inc === Infinity ? Infinity : w + cr.inc))}</span></td>`;
-            tr.addEventListener('click', () => N.App.decide.focusRow(v.id));
+            act(tr, () => N.App.decide.focusRow(v.id));
             tb.append(tr);
           }
         }
@@ -493,62 +524,70 @@
     }
 
     function convergence(running, hist) {
-      const sec = h('details', { class: 'res-section res-details' });
+      const sec = h('details', { class: 'res-section res-details', 'data-key': 'chart' });
       if (running || S.ui.showChart) sec.open = true;
       const sum = h('summary', null, h('h3', { class: 'label-caps' }, 'How Nadir got there'), h('span', { class: 'faint res-details-sub' }, running ? 'live' : plural(hist.length, 'step')), h('span', { class: 'summary-chev', html: icon('chevronDown', 'icon-xs') }));
       const ch = h('div', { class: 'chart' });
-      const cv = h('canvas', { role: 'img', 'aria-label': 'Objective by iteration' });
-      ch.append(cv);
-      chartMeta = h('div', { class: 'chart-meta' });
-      sec.append(sum, ch, chartMeta);
-      sec.addEventListener('toggle', () => { if (!S.running) S.saveUI({ showChart: sec.open }); if (sec.open) paintChart(); });
-      chart = cv;
+      ch.append(chartCanvas);
+      sec.append(sum, ch, h('div', { class: 'chart-meta' }));
+      chart = chartCanvas;
       return sec;
     }
 
+    body.addEventListener('toggle', (e) => {
+      const d = e.target;
+      if (!d || d.tagName !== 'DETAILS') return;
+      if (d.dataset.key === 'chart') { if (!S.running) S.saveUI({ showChart: d.open }); if (d.open) paintChart(); }
+      else if (d.dataset.key === 'sens') S.saveUI({ showSensitivity: d.open });
+    }, true);
+
+    let wasResult = false;
     function render() {
       const r = S.result;
       const running = S.running;
       root.classList.toggle('is-empty', !r && !running);
-      if (!r && !running) { empty(); return; }
+      if (!r && !running) { wasResult = false; empty(); return; }
+      const enter = !wasResult || emptyKind !== '';
+      wasResult = true;
       emptyKind = '';
+      readyKey = '';
+      actions.clear();
       root.classList.remove('is-empty', 'is-welcome');
-      const wrap = h('div', { class: 'res' + (S.stale && !running ? ' is-stale' : '') + (running ? ' is-running' : '') });
+      const wrap = h('div', { class: 'res' + (S.stale && !running ? ' is-stale' : '') + (running ? ' is-running' : '') + (enter ? ' is-enter' : '') });
       const src = running ? (S.progress || {}) : r;
       const sl = statusLine(r || {}, running);
       liveStatus = sl;
       if (!running) {
         sl.meta.textContent = metaText(r);
         const copy = h('button', { class: 'btn btn-ghost btn-icon btn-sm', type: 'button', 'aria-label': 'Copy for Excel', 'data-tip': 'Copy for Excel', html: icon('copy', 'icon-sm') });
-        copy.addEventListener('click', () => N.IO.copyForExcel());
+        act(copy, () => N.IO.copyForExcel());
         if (r.values) sl.el.append(copy);
       } else sl.meta.textContent = 'working…';
       wrap.append(sl.el);
       if (S.stale && !running) {
-        const n = h('button', { class: 'stale-note', type: 'button', html: icon('info', 'icon-xs') + `<span>Model changed since this solve</span><span class="stale-cta">Refresh ${keys('Mod+Enter')}</span>` });
-        n.addEventListener('click', () => N.Solve.run());
+        const n = h('button', { class: 'stale-note', type: 'button', 'data-key': 'stale', html: icon('info', 'icon-xs') + `<span>Model changed since this solve</span><span class="stale-cta">Refresh ${keys('Mod+Enter')}</span>` });
+        act(n, () => N.Solve.run());
         wrap.append(n);
       }
       if (!running && r.status === 'error') {
         wrap.append(h('div', { class: 'error-box', html: icon('alert', 'icon-sm') + `<span>${esc(r.message || 'Something went wrong')}</span>` }));
-        body.replaceChildren(wrap);
+        commit(wrap, enter);
         return;
       }
       const showHero = running || (r.objective != null && Number.isFinite(r.objective));
       if (showHero) {
-        const hero = h('div', { class: 'res-hero' + (!running && r.status === 'optimal' ? ' is-optimal' : '') });
+        const hero = h('div', { class: 'res-hero' + (!running && r.status === 'optimal' ? ' is-optimal' : ''), 'data-key': 'hero' });
         const sense = S.model.goal.sense;
         const label = h('div', { class: 'res-hero-label' }, running ? 'Best so far' : r.status === 'infeasible' ? 'Goal at the closest plan' : sense === 'target' ? 'Goal reached' : sense === 'min' ? 'Lowest possible goal' : 'Highest possible goal');
         const val = h('div', { class: 'res-hero-value' });
-        const num = h('span', { class: 'num' }, running ? (Number.isFinite(src.best) ? fmt(src.best) : '…') : fmt(r.objective));
+        const num = h('span', { class: 'num', 'data-key': 'hero-num' }, running ? (Number.isFinite(src.best) ? fmt(src.best) : '…') : fmt(r.objective));
         if (!running && (r.status === 'optimal' || r.status === 'feasible')) val.append(h('span', { class: 'found-dot', 'aria-hidden': 'true' }));
         val.append(num);
         hero.append(label, val);
         if (!running && animated !== r && !r.quiet) {
           animated = r;
-          const b = S.baseline && Number.isFinite(S.baseline.goal) ? S.baseline.goal : 0;
-          countUp(num, b, r.objective, 620);
           hero.classList.add('is-fresh');
+          heroCount = { from: S.baseline && Number.isFinite(S.baseline.goal) ? S.baseline.goal : 0, to: r.objective };
         }
         if (!running && S.baseline && Number.isFinite(S.baseline.goal) && (r.status === 'optimal' || r.status === 'feasible')) {
           const b = S.baseline.goal, v = r.objective;
@@ -569,7 +608,7 @@
       }
       if (!running && r.status === 'infeasible') wrap.append(diagnosis(r));
       if (!running && r.status === 'unbounded') {
-        const ub = h('div', { class: 'diag-box', html: `<h4>${icon('alert', 'icon-sm')}The goal can grow forever</h4><p>Nothing stops ${r.growing && r.growing.length ? 'these decisions' : 'some decision'} from growing without end. Give ${r.growing && r.growing.length === 1 ? 'it' : 'them'} a maximum, or add a limit that caps ${r.growing && r.growing.length === 1 ? 'it' : 'them'}.</p>` });
+        const ub = h('div', { class: 'diag-box', 'data-key': 'unbounded', html: `<h4>${icon('alert', 'icon-sm')}The goal can grow forever</h4><p>Nothing stops ${r.growing && r.growing.length ? 'these decisions' : 'some decision'} from growing without end. Give ${r.growing && r.growing.length === 1 ? 'it' : 'them'} a maximum, or add a limit that caps ${r.growing && r.growing.length === 1 ? 'it' : 'them'}.</p>` });
         const chips = h('div', { class: 'diag-rules' });
         const seen = new Set();
         (r.growing || []).slice(0, 6).forEach((j) => {
@@ -579,11 +618,11 @@
           if (seen.has(label)) return;
           seen.add(label);
           const b = h('button', { type: 'button', html: icon('arrowRight', 'icon-xs') + `Set a max for <span class="mono">${esc(label)}</span>` });
-          b.addEventListener('click', () => N.App.decide.focusUpper(v.id));
+          act(b, () => N.App.decide.focusUpper(v.id));
           chips.append(b);
         });
         const addR = h('button', { type: 'button', html: icon('plus', 'icon-xs') + 'Add a limit' });
-        addR.addEventListener('click', () => N.App.rules.add());
+        act(addR, () => N.App.rules.add());
         chips.append(addR);
         ub.append(chips);
         wrap.append(ub);
@@ -599,35 +638,61 @@
       if (running || hist.length > 1) wrap.append(convergence(running, hist));
       else chart = null;
       if (!running && r.values && r.status !== 'infeasible') {
-        const acts = h('div', { class: 'res-actions' });
+        const acts = h('div', { class: 'res-actions', 'data-key': 'actions' });
         const keep = h('button', { class: 'btn btn-soft', type: 'button', html: icon('pin', 'icon-sm') + 'Use as starting point', 'data-tip': 'Copy these values into the decisions, so the live checks show this plan' });
-        keep.addEventListener('click', () => N.Solve.keep());
+        act(keep, () => N.Solve.keep());
         const restore = h('button', { class: 'btn btn-outline', type: 'button', html: icon('restore', 'icon-sm') + 'Restore', disabled: !S.kept, 'data-tip': 'Go back to the values before Keep' });
-        restore.addEventListener('click', () => N.Solve.restore());
+        act(restore, () => N.Solve.restore());
         const scen = h('button', { class: 'btn btn-outline', type: 'button', html: icon('bookmark', 'icon-sm') + 'Save scenario', 'data-tip': 'Remember this answer to compare later' });
-        scen.addEventListener('click', () => N.Scenarios.saveCurrent());
+        act(scen, () => N.Scenarios.saveCurrent());
         const xl = h('button', { class: 'btn btn-ghost', type: 'button', html: icon('table', 'icon-sm') + 'Copy for Excel' });
-        xl.addEventListener('click', () => N.IO.copyForExcel());
+        act(xl, () => N.IO.copyForExcel());
         acts.append(keep, restore, scen, xl);
         wrap.append(acts);
       }
-      body.replaceChildren(wrap);
-      card.querySelector('.print-title').textContent = S.model.name;
+      commit(wrap, enter);
+      const pt = card.querySelector('.print-title');
+      if (pt.textContent !== S.model.name) pt.textContent = S.model.name;
       paintChart();
     }
 
+    let heroCount = null;
+    function commit(wrap, enter) {
+      const live = enter ? (body.replaceChildren(wrap), wrap) : patch(body, wrap);
+      liveStatus = liveStatus && {
+        el: live.querySelector('[data-key="status"]'),
+        meta: live.querySelector('.res-meta'),
+        num: S.running ? live.querySelector('[data-key="hero-num"]') : null
+      };
+      chartMeta = live.querySelector('.chart-meta');
+      if (!live.querySelector('[data-key="chart"]')) chart = null;
+      if (!enter) live.classList.remove('is-enter');
+      if (heroCount) {
+        const n = live.querySelector('[data-key="hero-num"]');
+        if (n) countUp(n, heroCount.from, heroCount.to, 620);
+        heroCount = null;
+      }
+    }
+
+    let chartRaf = 0;
     function paintChart() {
-      if (!chart) return;
+      if (!chart || chartRaf) return;
+      chartRaf = requestAnimationFrame(paintNow);
+    }
+    function paintNow() {
+      chartRaf = 0;
+      if (!chart || !chart.isConnected) return;
       const hist = S.running ? (N.Solve.liveHistory || []) : (S.result && S.result.history) || [];
       drawChart(chart, hist.map((y, i) => [i, y]), { step: S.result && (S.result.engine === 'bb' || S.result.engine === 'de') });
       if (chartMeta) {
-        chartMeta.innerHTML = hist.length ? `<span>start ${esc(fmt(hist[0]))}</span><span>${esc(fmt(hist.length))} steps</span><span>best ${esc(fmt(hist[hist.length - 1]))}</span>` : '';
+        const html = hist.length ? `<span>start ${esc(fmt(hist[0]))}</span><span>${esc(fmt(hist.length))} steps</span><span>best ${esc(fmt(hist[hist.length - 1]))}</span>` : '';
+        if (chartMeta._h !== html) { chartMeta._h = html; chartMeta.innerHTML = html; }
       }
     }
 
     function progress(p) {
-      if (!liveStatus) return;
-      if (liveStatus.num && Number.isFinite(p.best)) liveStatus.num.textContent = fmt(p.best);
+      if (!liveStatus || !liveStatus.meta) return;
+      if (liveStatus.num && Number.isFinite(p.best)) { const t = fmt(p.best); if (liveStatus.num.textContent !== t) liveStatus.num.textContent = t; }
       liveStatus.meta.textContent = `${p.ms < 1000 ? Math.round(p.ms) + ' ms' : (p.ms / 1000).toFixed(1) + ' s'} · iteration ${fmt(p.iter || 0)}${Number.isFinite(p.violation) && p.violation > 1e-6 ? ` · violation ${fmt(p.violation)}` : ''}`;
       paintChart();
     }
@@ -635,12 +700,11 @@
     let staleShown = false;
     const refreshEmpty = () => {
       if (S.result || S.running) return false;
-      const want = S.isBlank() ? 'welcome' : 'ready';
-      if (want === 'welcome' && emptyKind === 'welcome') return true;
       empty();
       return true;
     };
-    S.on('result', () => { showAllVars = false; showAllRows = false; staleShown = S.stale; render(); });
+    let lastResult = null;
+    S.on('result', () => { if (S.result !== lastResult) { lastResult = S.result; showAllVars = false; showAllRows = false; } staleShown = S.stale; render(); });
     S.on('model', () => {
       if (refreshEmpty()) return;
       if (S.stale !== staleShown && !S.running) { staleShown = S.stale; render(); }

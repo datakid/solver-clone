@@ -140,7 +140,7 @@
 .wz-table tr:last-child td, .wz-table tbody tr:last-child th { border-bottom: 0; }
 .wz-table td + td { border-left: 1px solid var(--border); }
 .wz-cell { width: 100%; min-width: 84px; height: 36px; padding: 0 10px; background: transparent; border: 0; }
-.wz-cell:focus { background: var(--accent-softer); box-shadow: inset 0 0 0 2px var(--accent); }
+.wz-cell:focus { background: var(--accent-softer); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent); }
 .wz-cell::placeholder { color: var(--text-3); }
 .wz-x { width: 36px; text-align: center; }
 td.wz-x { border-left: 0 !important; }
@@ -159,6 +159,34 @@ td.wz-x { border-left: 0 !important; }
 .wizard-dialog .dialog-body { padding-bottom: 22px; }
 
 .header-wizard { margin-right: 6px; height: 32px; }
+
+.results-col > .card { scrollbar-gutter: stable; contain: layout paint; }
+.res-body { contain: layout; }
+.res-hero-value .num { min-width: 1ch; }
+.res-table tbody tr { transition: background-color 160ms var(--ease); }
+.res-table td.num { transition: color 200ms var(--ease); }
+.res.is-stale .res-hero, .res.is-stale .res-section, .res.is-stale .res-story { will-change: opacity; }
+.chart canvas { display: block; width: 100%; height: 100%; }
+.engine-hint { transition: color 200ms var(--ease), background-color 200ms var(--ease); }
+.engine-hint.is-pwl { color: var(--accent-strong); }
+.pill { transition: background-color 180ms var(--ease), color 180ms var(--ease); }
+.code-hl-inner { will-change: transform; }
+.res-story .mono { font-size: .92em; }
+@media (prefers-reduced-motion: reduce) {
+  .res > *, .res.is-enter > * { animation: none !important; }
+}
+
+.btn:focus-visible, .switch:focus-visible, .template-card:focus-visible, .wz-kind:focus-visible, .welcome-wizard:focus-visible, .idea-chip:focus-visible, .assist-chip:focus-visible, .fix-btn:focus-visible, .add-row:focus-visible, .stale-note:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus);
+}
+.btn-primary:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus), 0 6px 16px -6px color-mix(in srgb, var(--accent) 60%, transparent); }
+.segmented button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus); }
+.row .grip:focus-visible { outline: none; background: var(--surface-2); box-shadow: inset 0 0 0 1.5px var(--focus); }
+.res-details > summary:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus); }
+.res-table tr.is-link:focus-visible { outline: none; background: var(--accent-softer); }
+.solve-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--focus); }
+.sheet-handle:focus-visible { outline: none; }
+.sheet-handle:focus-visible::before { background: var(--accent); }
 @media (max-width: 1100px) {
   .rule-row .rule-err { padding-left: 28px; }
 }

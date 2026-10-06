@@ -16,7 +16,7 @@
 
   const EXAMPLES = {
     sum: 'sum(profit * make)', prod: 'prod(1 + r)', mean: 'mean(scores)', min: 'min(a, b)', max: 'max(x)', len: 'len(x)',
-    dot: 'dot(cost, qty)', quad: 'quad(w, cov)', sumsq: 'sumsq(fit - y)', norm: 'norm(x - p)', rowsum: 'rowsum(ship) <= supply',
+    dot: 'dot(cost, qty)', sumprod: 'sumprod(price, qty)', pos: 'pos(demand - make)', neg: 'neg(stock)', clamp: 'clamp(x, 0, 10)', quad: 'quad(w, cov)', sumsq: 'sumsq(fit - y)', norm: 'norm(x - p)', rowsum: 'rowsum(ship) <= supply',
     colsum: 'colsum(ship) >= demand', cumsum: 'cumsum(stock)', matmul: 'matmul(A, x) <= b', T: 'T(M)', rows: 'rows(M)', cols: 'cols(M)',
     ones: 'ones(3)', zeros: 'zeros(2, 3)', abs: 'abs(x - 5)', sqrt: 'sqrt(area)', exp: 'exp(-t / 4)', log: 'log(1 + spend)', ln: 'ln(x)',
     log10: 'log10(x)', sin: 'sin(angle)', cos: 'cos(angle)', tan: 'tan(angle)', pow: 'pow(x, 1.5)', round: 'round(x)', floor: 'floor(x)',
@@ -24,8 +24,9 @@
   };
   const GROUPS = [
     ['Totals & lists', ['sum', 'prod', 'mean', 'min', 'max', 'len', 'cumsum', 'ones', 'zeros']],
-    ['Tables & vectors', ['dot', 'rowsum', 'colsum', 'matmul', 'T', 'rows', 'cols', 'quad', 'sumsq', 'norm']],
-    ['Math', ['abs', 'sqrt', 'exp', 'log', 'ln', 'log10', 'pow', 'sin', 'cos', 'tan']],
+    ['Shortfalls & caps', ['pos', 'neg', 'clamp', 'abs']],
+    ['Tables & vectors', ['dot', 'sumprod', 'rowsum', 'colsum', 'matmul', 'T', 'rows', 'cols', 'quad', 'sumsq', 'norm']],
+    ['Math', ['sqrt', 'exp', 'log', 'ln', 'log10', 'pow', 'sin', 'cos', 'tan']],
     ['Rounding & logic', ['round', 'floor', 'ceil', 'sign', 'if']]
   ];
 

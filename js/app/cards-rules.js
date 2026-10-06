@@ -71,7 +71,7 @@
       return {
         el,
         bind(it) { cur = it; label.setValue(it.label); expr.setValue(it.expr); sw.set(it.enabled !== false); el.classList.toggle('is-disabled', it.enabled === false); },
-        live(err, st, nonlinear) {
+        live(err, st, nonlinear, pwl) {
           expr.setError(err);
           errl.set(err);
           const phrase = S.settings.explain && !err && !E.isBlank(cur.expr) ? E.explainRule(cur.expr, { labels: S.labelMap(), each: st && st.scalar > 1 ? st.scalar : 0 }) : null;
@@ -92,10 +92,12 @@
           }
           const key = cls + html;
           if (key !== pillKey) { pill.className = cls; pill.innerHTML = html; pillKey = key; }
-          if (tip) pill.dataset.tip = tip + ' — checked with today’s starting values, before solving'; else delete pill.dataset.tip;
+          const ftip = tip ? tip + ' — checked with today’s starting values, before solving' : '';
+          if (ftip) { if (pill.dataset.tip !== ftip) pill.dataset.tip = ftip; } else if (pill.dataset.tip) delete pill.dataset.tip;
           const parts = [];
           if (st && !err && st.count > 1) parts.push(`expands to ${fmt(st.count)}`);
-          if (nonlinear && !err) parts.push('nonlinear');
+          if (pwl && !err) parts.push('corners → straight lines');
+          else if (nonlinear && !err) parts.push('nonlinear');
           const mt = parts.join(' · ');
           if (meta.textContent !== mt) meta.textContent = mt;
         },
@@ -125,12 +127,13 @@
       syncIdeas();
       const st = L.check ? L.check.rules : {};
       const nl = new Set((L.cls && L.cls.nonlinearRules) || []);
+      const pw = new Set((L.cls && L.cls.pwlRules) || []);
       let scalar = 0, off = 0, enabled = 0, errs = 0, binding = 0;
       for (const r of S.model.constraints) {
         const row = rows.get(r.id);
         const e = L.errors.rules[r.id];
         const s = st[r.id];
-        if (row) row.live(e, s, nl.has(r.id));
+        if (row) row.live(e, s, nl.has(r.id), pw.has(r.id));
         if (e) errs++;
         if (s && r.enabled !== false) { enabled++; scalar += s.count; if (s.off) off++; if (s.binding) binding++; }
       }
@@ -150,6 +153,7 @@
     S.on('structure', sync);
     S.on('model', () => { for (const r of S.model.constraints) { const row = rows.get(r.id); if (row) row.bind(r); } });
     S.on('live', live);
+    S.on('symbols', () => rows.rows.forEach((r) => r.refresh()));
     sync();
     return {
       el: c.el, rows, add: addRule,
@@ -335,6 +339,7 @@
     S.on('structure', sync);
     S.on('model', () => { for (const p of S.model.parameters) { const r = rows.get(p.id); if (r) r.bind(p); } });
     S.on('live', live);
+    S.on('symbols', () => rows.rows.forEach((r) => r.refresh()));
     sync({ all: true });
     return { el: c.el, rows, add: addParam, expand: () => setCollapsed(false, false), focusRow: (id) => { setCollapsed(false, false); const r = rows.get(id); if (r) { r.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); r.flash(); } } };
   }

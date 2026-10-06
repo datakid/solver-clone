@@ -47,8 +47,8 @@
     btn.classList.toggle('is-blocked', n > 0 && !S.running);
     const ready = !n && !S.running && S.model.variables.length > 0 && !S.result && !!(S.live && S.live.cls);
     btn.classList.toggle('is-ready', ready);
-    btn.dataset.tip = n > 0 ? `${n} ${n === 1 ? 'line needs' : 'lines need'} fixing` : '';
-    if (!n) delete btn.dataset.tip;
+    const tip = n > 0 ? `${n} ${n === 1 ? 'line needs' : 'lines need'} fixing` : '';
+    if (tip) { if (btn.dataset.tip !== tip) btn.dataset.tip = tip; } else if (btn.dataset.tip != null) delete btn.dataset.tip;
   }
 
   const Solve = {
@@ -74,22 +74,28 @@
         startTimer = setTimeout(() => { setRunning(true); S.emit('result'); animate(); }, 60);
       }
       const settings = S.solverSettings();
+      if (o.quiet && S.result && S.result.values && (S.result.status === 'optimal' || S.result.status === 'feasible') && C && S.result.values.length === C.n) settings.warm = S.result.values;
       const limit = settings.timeLimit * 1000;
       let raf = 0;
+      const ringFg = ring.querySelector('.ring-fg');
+      let lastOff = '';
       function animate() {
-        const el = ring.querySelector('.ring-fg');
         const p = Math.min(1, (performance.now() - t0) / limit);
-        el.setAttribute('stroke-dashoffset', String(RING * (1 - p)));
-        if (S.running) raf = requestAnimationFrame(animate);
+        const off = (RING * (1 - p)).toFixed(1);
+        if (off !== lastOff) { lastOff = off; ringFg.setAttribute('stroke-dashoffset', off); }
+        if (S.running && p < 1) raf = requestAnimationFrame(animate);
       }
+      let bestRaf = 0, bestText = '';
+      const showBest = () => { bestRaf = 0; if (best.textContent !== bestText) best.textContent = bestText; };
       try {
         const res = await W.solve(JSON.parse(JSON.stringify(S.model)), settings, (p) => {
           S.progress = p;
-          if (Number.isFinite(p.best)) { Solve.liveHistory.push(p.best); best.textContent = fmt(p.best); }
+          if (Number.isFinite(p.best)) { Solve.liveHistory.push(p.best); bestText = fmt(p.best); if (!bestRaf) bestRaf = requestAnimationFrame(showBest); }
           S.emit('progress', p);
         });
         clearTimeout(startTimer);
         cancelAnimationFrame(raf);
+        cancelAnimationFrame(bestRaf);
         S.running = false;
         setRunning(false);
         res.clientMs = performance.now() - t0;

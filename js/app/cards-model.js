@@ -132,11 +132,18 @@
       const C = S.compiled;
       targetGap.textContent = has && S.model.goal.sense === 'target' && C && C.target != null ? `  ·  ${fmt(Math.abs(v - C.target))} from target` : '';
       const cls = L.cls;
-      if (cls && cls.engine) { engine.innerHTML = icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs') + esc(`${cls.linear ? 'Straight-line' : cls.nonsmooth ? 'Bumpy' : 'Curved'}${cls.hasInt ? ', whole numbers' : ''} · ${cls.label}`); engine.dataset.tip = cls.linear ? 'Every formula is a weighted sum, so Nadir can prove the answer is the very best' : cls.nonsmooth ? 'Has jumps or kinks, so Nadir searches widely for a great answer' : 'Has curves, so Nadir tries several starting points and keeps the best'; }
-      else engine.textContent = '';
+      let ehtml = '', etip = '';
+      if (cls && cls.engine) {
+        const kind = cls.pwl ? 'Straight lines with corners' : cls.linear ? 'Straight-line' : cls.nonsmooth ? 'Bumpy' : 'Curved';
+        ehtml = icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs') + esc(`${kind}${cls.hasInt ? ', whole numbers' : ''} · ${cls.label}`);
+        etip = cls.pwl ? `abs / max / min / pos are rewritten as ${cls.pieces} straight-line ${cls.pieces === 1 ? 'piece' : 'pieces'}, so Nadir can still prove the very best answer` : cls.linear ? 'Every formula is a weighted sum, so Nadir can prove the answer is the very best' : cls.nonsmooth ? 'Has jumps or kinks, so Nadir searches widely for a great answer' : 'Has curves, so Nadir tries several starting points and keeps the best';
+      }
+      if (engine._h !== ehtml) { engine._h = ehtml; engine.innerHTML = ehtml; engine.classList.toggle('is-pwl', !!(cls && cls.pwl)); }
+      if (etip) { if (engine.dataset.tip !== etip) engine.dataset.tip = etip; } else delete engine.dataset.tip;
     }
     S.on('model', bind);
     S.on('live', live);
+    S.on('symbols', () => { expr.refresh(); target.refresh(); });
     bind();
     if (S.ui.goalView === 'text') setTimeout(() => setView('text'), 0);
     return { el: c.el, focus: () => (S.ui.goalView === 'text' ? ta.focus() : expr.focus('end')), setView, flash: () => flash(c.el) };

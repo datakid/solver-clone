@@ -330,6 +330,8 @@
         num('maxIter', 'Max iterations', { step: '1000', min: '100' }),
         num('nodeLimit', 'Node limit', { step: '1000', min: '10' }),
         h('div', { class: 'full' }, sel('lpMethod', 'LP method', [['auto', 'Auto — revised simplex with LU (scales to large sparse models)'], ['revised', 'Revised simplex (sparse LU, bounded)'], ['dense', 'Dense tableau (classic v1 engine)']], 'Revised is used for everything unless you pick Dense. Dense falls back automatically on numerical trouble.')))),
+      section('Smart modelling',
+        toggle('reform', 'Straighten corners', 'Rewrite abs, max, min, pos and clamp as straight-line pieces when it is safe, so Simplex or Branch & Bound can prove the very best answer instead of searching.')),
       section('Integer models',
         toggle('presolve', 'Presolve', 'Drop redundant rules, turn one-variable rules into bounds, tighten bounds and big-M coefficients before searching.'),
         toggle('cuts', 'Cutting planes', 'Add Gomory mixed-integer cuts at the root to close the gap faster.')),

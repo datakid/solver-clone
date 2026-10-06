@@ -4,6 +4,25 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## What's new in v4 — a smarter solver, a calmer UI
+
+### Solver
+- **Corner straightening** (`js/engine/reform.js`). Models using `abs`, `max`, `min`, `pos`, `neg` or `clamp` in a convex way (minimizing `abs`/`max`, maximizing `min`, `abs(…) <= k`, `max(…) <= k`, `min(…) >= k`) are rewritten into an exact linear program with helper variables (epigraph form). Before v4 these went to Differential Evolution, which only gives a "good" answer. Now they go to **Simplex or Branch & Bound**, which proves the very best answer and keeps shadow prices. The check is sign-aware (convexity is tracked through `+ − ×k ÷k`). Non-convex uses such as `maximize abs(x)` or `abs(x) >= 2` still go to the search engines, so results stay correct. Infeasibility diagnosis, smallest fixes, the unbounded culprit and CPLEX `.lp` export (`aux_k` columns, `piece` rows) all work on the rewritten model. You can switch it off in Settings → Smart modelling → *Straighten corners*.
+- Kinked models that can't be rewritten no longer go to the gradient engine (ALM). They go to DE, which is the safer choice for corners.
+- **Warm starts**: a live re-solve (from a slider or number edit) and each step of a parameter sweep start from the previous answer. Nonlinear search converges in fewer steps and stays in the same valley.
+- `linearize` takes a shared memo, so linearizing node by node stays linear-time.
+- **New functions**: `pos(x)` (shortfall/excess), `neg(x)`, `clamp(x, lo, hi)`, `sumprod(a, b)` (Excel SUMPRODUCT). The names stay free to use for your own numbers. Help → *Shortfalls & caps*.
+- **New templates**: *Staffing with shortfalls* (penalised unmet demand plus an overtime cap via `pos`) and *Robust line fit* (L1 regression that ignores an outlier). Both solve to proven Optimal with Simplex.
+
+### UI performance and polish
+- The results panel is **diffed in place** (`N.util.morph/patch`, keyed sections and rows). It is no longer rebuilt with `replaceChildren`. Re-rendering the same result changes almost nothing in the DOM. Scroll position, open `<details>`, focus and the chart canvas all survive. There is one delegated click handler and one toggle handler, instead of a listener on every row.
+- The entrance animation runs only when results first appear. Later updates use a short fade, so there is no stagger flicker on each re-solve. The readiness checklist only re-renders when its inputs change.
+- The chart repaints at most once per animation frame. The solve ring and the "best so far" label are throttled to one frame and skip writes when nothing changed. `countUp` can be cancelled, so quick re-solves don't fight each other.
+- Fields cache their highlighted HTML (keyed on text, error and symbol version) and their symbol sets. A live check no longer repaints every input. Fields repaint only when the set of names changes (`symbols` event).
+- Guarded attribute and tooltip writes, a debounced save-state badge, and title or name writes only when the text changes. `scrollbar-gutter: stable` and containment on the results card prevent layout shift. Reduced-motion users get no result animation.
+- Goal-card hint, readiness panel and limit rows say *"Straight lines with corners · Simplex LP"* / *"corners → straight lines"*. The story adds *"…rewritten as straight lines, so Simplex could prove this is the very best answer"*.
+- Tests: engine **35/35** (8 new v4 cases: median via abs, minimax and L1 fit, `pos` penalties in goal and rules, abs with integers via B&B, non-convex fallback and the toggle, diagnose, unbounded and export on rewritten models, new functions, warm start). All 12 templates solve Optimal.
+
 ## What's new in v3 — built for newcomers
 - **Guided setup** (`js/app/wizard.js` + pure `js/engine/guide.js`). Pick a situation (*Make the most profit · Split a budget · Pick the best set · Cheapest mix · Who does what · Ship at lowest cost*) and fill in a small table. Nadir writes the goal, decisions, limits and numbers for you, checks your inputs live ("Labour hours used per Desks is empty"), then solves. Each recipe opens with a worked example you can clear. You can reach it from the welcome panel, the header button, the Goal card tip, the palette, the Help menu, or `?wizard[=produce|budget|pick|blend|assign|ship]`.
 - **Click-to-build formulas**: when you focus the goal or a limit, a bar appears under it with your decisions, numbers, ≤ / ≥ / =, + − × ÷ and "total of…". It adds `*` and spacing for you, so you don't need to know the syntax.
@@ -78,7 +97,7 @@ Product mix, Diet, Transportation, Assignment, Knapsack, Portfolio, Curve fit, B
 | `index.html?tour` | Starts the guided tour |
 | `index.html?wizard[=kind]` | Opens Guided setup (optionally straight into `produce`, `budget`, `pick`, `blend`, `assign`, `ship`) |
 | `index.html?guide[=functions\|results]` | Opens the Language guide |
-| `index.html?template=<key>` | Loads a template (`bakery`, `ad-budget`, `product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `break-even`) |
+| `index.html?template=<key>` | Loads a template (`bakery`, `ad-budget`, `product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `staffing`, `robust-fit`, `break-even`) |
 | `&solve` | Solves right after loading |
 | `&text` | Opens Text view |
 | `&theme=dark\|light\|system` | Sets the theme |
@@ -98,6 +117,7 @@ js/engine/            pure, no DOM, shared by main thread and worker
   syntax.js           lexer, Pratt parser, highlighter, suggestions
   ir.js               scalar IR: folding, evaluation, linearizer, value+gradient codegen
   model.js            analyzer, scalarizer, compile(model)
+  reform.js           sign-aware epigraph rewrite of convex abs/max/min/pos into extra LP rows and columns
   lp.js               simplex, branch & bound, elastic LP
   nlp.js              L-BFGS-B, ALM, multistart, differential evolution
   solve.js            engine choice, target mode, diagnose, live check, CPLEX export, sweep, worker entry
@@ -126,5 +146,6 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 ## Known limits
 - The sparse LU uses Markowitz pivoting on a hash-map active submatrix. It is fine up to roughly 10⁴ rows. It is not a Forrest–Tomlin/HiGHS-class kernel, so very large (10⁵+) LPs are still slow in a browser.
 - Cuts are Gomory mixed-integer only (no knapsack cover or flow cover cuts). There is no dual simplex for re-optimising B&B nodes; child nodes are warm-started with the primal method.
-- Ranging applies to continuous LPs (Simplex engine); it is not available for MIP or NLP results.
+- Ranging applies to continuous LPs (Simplex engine). It is not available for MIP or NLP results, or for models rewritten from abs/max/min (shadow prices still are).
+- Corner straightening covers convex uses only. Non-convex ones (for example `maximize abs(x)`) would need binary big-M variables, which aren't generated automatically yet.
 - Install buttons depend on the browser: iOS needs Share → Add to Home Screen.

@@ -99,6 +99,26 @@
       }
     },
     {
+      key: 'staffing', name: 'Staffing with shortfalls', kind: 'LP · pos()', icon: 'users', blurb: 'Plan production when missing demand costs a penalty.',
+      note: ['Decide how much of each product to make; every unit of unmet demand costs a penalty.', 'pos(demand − make) counts only the shortfall. Nadir turns it into straight lines and proves the best plan.'],
+      model: {
+        goal: { sense: 'min', expr: 'sum(cost * make) + penalty * sum(pos(demand - make))' },
+        variables: [V('make', { shape: '3', upper: '60', labels: ['Basic', 'Plus', 'Pro'] })],
+        constraints: [R('Line hours', 'sum(hours * make) <= lineHours'), R('Overtime cap', 'sum(pos(make - 40)) <= 10')],
+        parameters: [P('cost', '[5, 8, 14]'), P('demand', '[40, 45, 30]'), P('hours', '[1, 1.5, 2]'), P('lineHours', '160', { min: 0, max: 300, step: 5 }), P('penalty', '20', { min: 0, max: 60, step: 1 })]
+      }
+    },
+    {
+      key: 'robust-fit', name: 'Robust line fit', kind: 'LP · abs()', icon: 'trend', blurb: 'Fit a line that ignores one bad measurement.',
+      note: ['Fit y = m·t + c by the smallest total absolute error, so one outlier barely moves the line.', 'abs() in the goal is solved exactly by Simplex — compare with squared errors in Curve fit.'],
+      model: {
+        goal: { sense: 'min', expr: 'sum(abs(m * t + c - y))' },
+        variables: [V('m', { lower: '-inf' }), V('c', { lower: '-inf' })],
+        constraints: [],
+        parameters: [P('t', '1..8'), P('y', '[3.1, 4.9, 7.2, 8.8, 11.1, 40, 15.2, 16.9]')]
+      }
+    },
+    {
       key: 'break-even', name: 'Break-even', kind: 'Target', icon: 'tag', blurb: 'The sales volume where profit is exactly zero.',
       note: ['Find the sales volume where profit is exactly zero.', 'Target mode solves goal = value instead of maximizing.'],
       model: {

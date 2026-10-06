@@ -270,7 +270,7 @@ NadirEngine.define('nlp', function (E) {
     const rand = mulberry32(opt.seed || 1);
     const starts = Math.max(1, opt.multistart || 1);
     const { pts } = sampleBox(P.lower, P.upper, init, rand, Math.max(1, starts - 1));
-    const list = [Float64Array.from(init)].concat(starts > 1 ? pts : []);
+    const list = [Float64Array.from(init)].concat(opt.extra || [], starts > 1 ? pts : []);
     let best = null;
     let iters = 0;
     const history = [];
@@ -309,7 +309,8 @@ NadirEngine.define('nlp', function (E) {
       return x;
     };
     const tol = P.feasTol;
-    const pop = [fix(Float64Array.from(init))].concat(pts.map(fix));
+    const seeds = (opt.extra || []).slice(0, Math.max(0, NP - 2)).map((x) => fix(Float64Array.from(x)));
+    const pop = [fix(Float64Array.from(init))].concat(seeds, pts.slice(0, NP - 1 - seeds.length).map(fix));
     const fit = pop.map((x) => { const s = P.score(x); return { f: s.f, v: s.worst }; });
     const Fs = new Float64Array(NP).fill(0.5), CRs = new Float64Array(NP).fill(0.9);
     let bi = 0;

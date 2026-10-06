@@ -336,17 +336,65 @@
 
   const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   function countUp(el, from, to, ms) {
+    const token = (el._cu = (el._cu || 0) + 1);
     if (!Number.isFinite(to)) { el.textContent = fmt(to); return; }
     if (!Number.isFinite(from) || from === to || reduceMotion()) { el.textContent = fmt(to); return; }
     const t0 = performance.now(), dur = ms || 520;
     const step = (now) => {
-      if (!el.isConnected) return;
+      if (!el.isConnected || el._cu !== token) return;
       const p = Math.min(1, (now - t0) / dur);
       const e = 1 - Math.pow(1 - p, 3);
       el.textContent = p >= 1 ? fmt(to) : fmt(from + (to - from) * e, Number.isInteger(to) && Number.isInteger(from) ? { decimals: 0 } : null);
       if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+  }
+
+  const keyOf = (n) => (n.nodeType === 1 ? n.getAttribute('data-key') : null);
+  function syncAttrs(a, b) {
+    const ba = b.attributes;
+    for (let i = a.attributes.length - 1; i >= 0; i--) {
+      const nm = a.attributes[i].name;
+      if (!b.hasAttribute(nm)) a.removeAttribute(nm);
+    }
+    for (let i = 0; i < ba.length; i++) {
+      const { name, value } = ba[i];
+      if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+    }
+  }
+  function morph(a, b) {
+    if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName || keyOf(a) !== keyOf(b)) { a.replaceWith(b); return b; }
+    if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return a; }
+    if (a.getAttribute('data-morph') === 'keep') return a;
+    syncAttrs(a, b);
+    morphChildren(a, b);
+    return a;
+  }
+  function morphChildren(a, b) {
+    const keyed = new Map();
+    for (const c of a.children) { const k = keyOf(c); if (k) keyed.set(k, c); }
+    let cur = a.firstChild, nxt = b.firstChild;
+    while (nxt) {
+      const next = nxt.nextSibling;
+      const k = keyOf(nxt);
+      if (k && keyed.has(k)) {
+        const live = keyed.get(k);
+        keyed.delete(k);
+        if (live === cur) cur = cur.nextSibling; else a.insertBefore(live, cur);
+        morph(live, nxt);
+      } else if (cur && !(keyOf(cur) && keyed.has(keyOf(cur)))) {
+        const after = cur.nextSibling;
+        morph(cur, nxt);
+        cur = after;
+      } else a.insertBefore(nxt, cur);
+      nxt = next;
+    }
+    while (cur) { const after = cur.nextSibling; cur.remove(); cur = after; }
+  }
+  function patch(host, node) {
+    const first = host.firstElementChild;
+    if (!first || host.children.length > 1) { host.replaceChildren(node); return node; }
+    return morph(first, node);
   }
 
   function storage(key, fallback) {
@@ -358,5 +406,5 @@
 
   const VALLEY = '<svg class="valley-art" viewBox="0 0 240 120" aria-hidden="true"><defs><linearGradient id="valley-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".16"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><path class="valley-area" d="M10 22C70 22 84 100 120 100S170 22 230 22V120H10z" fill="url(#valley-fill)"/><path class="valley-grid" d="M10 100H230M10 61H230" /><path class="valley-min" d="M120 100V116"/><text class="valley-label" x="128" y="116">NADIR</text><path id="valley-curve" class="valley-curve" d="M10 22C70 22 84 100 120 100S170 22 230 22" pathLength="1"/><g class="valley-ball"><circle r="9" class="valley-halo"/><circle r="6" class="valley-dot"/><animateMotion dur="2.2s" begin="0s" fill="freeze" calcMode="spline" keyPoints="0;0.5;0.66;0.44;0.53;0.5" keyTimes="0;0.38;0.56;0.74;0.88;1" keySplines="0.5 0 0.6 1;0.3 0 0.5 1;0.4 0 0.5 1;0.4 0 0.5 1;0.4 0 0.5 1"><mpath href="#valley-curve"/></animateMotion></g></svg>';
 
-  N.util = { ICONS, icon, LOGO, VALLEY, esc, h, frag, fmt, debounce, fuzzy, markText, download, copyText, encodeShare, decodeShare, parseTable, toNumber, toTSV, toCSV, literal, safeName, timeAgo, isMac, MOD, keys, keyText, storage, store, plural, joinWords, countUp, reduceMotion };
+  N.util = { ICONS, icon, LOGO, VALLEY, esc, h, frag, fmt, debounce, fuzzy, markText, download, copyText, encodeShare, decodeShare, parseTable, toNumber, toTSV, toCSV, literal, safeName, timeAgo, isMac, MOD, keys, keyText, storage, store, plural, joinWords, countUp, reduceMotion, morph, patch };
 })(window.Nadir = window.Nadir || {});

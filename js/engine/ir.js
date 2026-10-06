@@ -192,8 +192,8 @@ NadirEngine.define('ir', function (E) {
       return T;
     }
 
-    linearize(roots) {
-      const memo = new Array(this.size);
+    linearize(roots, shared) {
+      const memo = shared || new Array(this.size);
       const op = this.op, a = this.a, b = this.b, c = this.c, val = this.val;
       const self = this;
       const EMPTY = new Map();

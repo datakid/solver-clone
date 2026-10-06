@@ -325,6 +325,67 @@ NadirEngine.define('tests', function (E) {
           const f = C.errors.goal && C.errors.goal.fix;
           return (f && f.kind === 'unknown' && f.name === 'pricee' && f.suggest === 'price') || JSON.stringify(C.errors.goal);
         }
+      },
+      {
+        name: 'v4 · abs() goal is linearized and solved exactly (median)', run() {
+          const r = E.solve(M({ sense: 'min', expr: 'sum(abs(x - pts))' }, [V('x', { lower: '-inf' })], [], [P('pts', '[1, 2, 7, 9, 30]')]), {});
+          return (r.status === 'optimal' && r.engine === 'simplex' && close(r.values[0], 7) && close(r.objective, 36) && r.pwl && r.pwl.pieces === 5) || fmt(r, r.pwl);
+        }
+      },
+      {
+        name: 'v4 · Minimax via max() and robust L1 line fit', run() {
+          const a = E.solve(M({ sense: 'min', expr: 'max(abs(x - 1), abs(x - 9))' }, [V('x', { lower: '-inf' })], []), {});
+          const b = E.solve(M({ sense: 'min', expr: 'sum(abs(m * t + c - y))' }, [V('m', { lower: '-inf' }), V('c', { lower: '-inf' })], [], [P('t', '1..6'), P('y', '[3, 5, 7, 9, 11, 60]')]), {});
+          return (a.engine === 'simplex' && close(a.values[0], 5) && close(a.objective, 4) && b.status === 'optimal' && b.engine === 'simplex' && close(b.values[0], 2, 1e-4) && close(b.values[1], 1, 1e-4)) || fmt(a) + ' ' + fmt(b);
+        }
+      },
+      {
+        name: 'v4 · Shortfall penalty with pos() inside rules and goal', run() {
+          const m = M({ sense: 'min', expr: 'sum(cost * make) + 20 * sum(pos(demand - make))' }, [V('make', { shape: '3', upper: '50' })], [R('sum(make) <= cap', 'Capacity'), R('sum(pos(make - 40)) <= 5', 'Overtime')], [P('cost', '[5, 8, 30]'), P('demand', '[40, 45, 30]'), P('cap', '100')]);
+          const r = E.solve(m, {});
+          return (r.status === 'optimal' && r.engine === 'simplex' && close(r.values[0], 40) && close(r.values[1], 45) && close(r.values[2], 0) && close(r.objective, 1160) && r.constraints.length === 2) || fmt(r);
+        }
+      },
+      {
+        name: 'v4 · Integer model with abs() runs Branch & Bound', run() {
+          const r = E.solve(M({ sense: 'min', expr: 'abs(3x + 5y - 22.5) + 0.01 * (x + y)' }, [V('x', { type: 'int', upper: '10' }), V('y', { type: 'int', upper: '10' })], []), {});
+          const dev = r.values ? Math.abs(3 * r.values[0] + 5 * r.values[1] - 22.5) : NaN;
+          return (r.status === 'optimal' && r.engine === 'bb' && close(dev, 0.5) && close(r.objective, 0.55)) || fmt(r);
+        }
+      },
+      {
+        name: 'v4 · Non-convex uses keep the safe search engines', run() {
+          const a = E.classify(E.compile(M({ sense: 'max', expr: 'abs(x - 3)' }, [V('x', { upper: '10' })], [])), {});
+          const b = E.classify(E.compile(M({ sense: 'min', expr: 'x' }, [V('x', { upper: '10' })], [R('abs(x - 5) >= 2')])), {});
+          const c = E.classify(E.compile(M({ sense: 'min', expr: 'x' }, [V('x', { upper: '10' })], [R('abs(x - 5) <= 2')])), {});
+          const d = E.classify(E.compile(M({ sense: 'min', expr: 'abs(x - 2)' }, [V('x')], [])), { reform: false });
+          const r = E.solve(M({ sense: 'max', expr: 'abs(x - 3)' }, [V('x', { upper: '10' })], []), {});
+          return (!a.pwl && a.engine !== 'simplex' && !b.pwl && c.pwl && c.engine === 'simplex' && !d.pwl && ['optimal', 'feasible'].includes(r.status) && close(r.values[0], 10, 1e-3)) || JSON.stringify({ a, b, c, d, r: fmt(r) });
+        }
+      },
+      {
+        name: 'v4 · Linearized models still diagnose, flag growth and export', run() {
+          const inf = E.solve(M({ sense: 'min', expr: 'abs(x - 4)' }, [V('x')], [R('x <= 1', 'Cap'), R('x >= 3', 'Floor')]), {});
+          const ub = E.solve(M({ sense: 'max', expr: 'y - abs(x - 2)' }, [V('x'), V('y')], [R('x <= 5')]), {});
+          const lp = E.toLP(M({ sense: 'min', expr: 'sum(abs(x - [1, 2]))' }, [V('x', { shape: '2' })], []), {});
+          const ids = (inf.diagnosis && inf.diagnosis.rules) || [];
+          return (inf.status === 'infeasible' && ids.length === 2 && ub.status === 'unbounded' && (ub.growing || []).includes(1) && !lp.error && /aux_2/.test(lp.text) && /piece/.test(lp.text)) || JSON.stringify({ inf: fmt(inf), ub: fmt(ub, ub.growing), lp: lp.error });
+        }
+      },
+      {
+        name: 'v4 · New functions pos / neg / clamp / sumprod', run() {
+          const C = E.compile(M({ sense: 'max', expr: 'sumprod(w, clamp(v, 0, 5)) + sum(pos(v)) + sum(neg(v))' }, [V('q')], [], [P('w', '[1, 2, 3]'), P('v', '[-2, 3, 9]')]));
+          const val = E.check(C).goal;
+          return (!C.errorCount && close(val, 21 + 12 + 2)) || JSON.stringify({ e: C.errors, val });
+        }
+      },
+      {
+        name: 'v4 · Warm start seeds nonlinear search', run() {
+          const m = M({ sense: 'min', expr: '(x - 7)^2 * (x - 1)^2 + 0.1 * (x - 7)^2' }, [V('x', { lower: '-inf', init: '0' })], []);
+          const cold = E.solve(m, { multistart: 1 });
+          const warm = E.solve(m, { multistart: 1, warm: [6.9] });
+          return (close(warm.values[0], 7, 1e-3) && warm.warmStart && warm.objective <= cold.objective + 1e-9) || fmt(warm) + ' cold ' + fmt(cold);
+        }
       }
     ];
   }

@@ -11,6 +11,10 @@ NadirEngine.define('model', function (E) {
     max: { sig: 'max(x) · max(a, b, …)', doc: 'Largest element, or elementwise maximum' },
     len: { sig: 'len(x)', doc: 'Number of elements' },
     dot: { sig: 'dot(a, b)', doc: 'Dot product' },
+    sumprod: { sig: 'sumprod(a, b)', doc: 'Multiply element by element, then add up (like Excel SUMPRODUCT)' },
+    pos: { sig: 'pos(x)', doc: 'The part above zero: max(x, 0) — shortfalls, overtime, excess' },
+    neg: { sig: 'neg(x)', doc: 'The part below zero, as a positive number: max(−x, 0)' },
+    clamp: { sig: 'clamp(x, lo, hi)', doc: 'x kept between lo and hi' },
     quad: { sig: 'quad(x, Q)', doc: 'Quadratic form xᵀQx' },
     sumsq: { sig: 'sumsq(x)', doc: 'Sum of squares' },
     norm: { sig: 'norm(x)', doc: 'Euclidean length' },
@@ -44,6 +48,7 @@ NadirEngine.define('model', function (E) {
   const BIN_OP = { '+': OP.ADD, '-': OP.SUB, '*': OP.MUL, '/': OP.DIV, '^': OP.POW };
   const CMP_OP = { '<': OP.LT, '<=': OP.LE, '>': OP.GT, '>=': OP.GE, '=': OP.EQ };
   const NAME_RE = /^[A-Za-z_\u00C0-\u024F\u0370-\u03FF][A-Za-z0-9_\u00C0-\u024F\u0370-\u03FF]*$/;
+  const SOFT = new Set(['pos', 'neg', 'clamp', 'sumprod']);
   const RESERVED = new Set(['maximize', 'minimize', 'target', 'var', 'param', 'int', 'bin', 'real', 'labels']);
 
   const size = (s) => s.reduce((a, b) => a * b, 1);
@@ -274,10 +279,21 @@ NadirEngine.define('model', function (E) {
           const k = ir.k(name === 'ones' ? 1 : 0);
           return T(dims, new Array(size(dims)).fill(k));
         }
+        case 'pos': case 'neg': {
+          need(1, 1);
+          const z = ir.k(0);
+          return map(ev(A[0]), (x) => ir.bin(OP.MAX, name === 'pos' ? x : ir.un(OP.NEG, x), z));
+        }
+        case 'clamp': {
+          need(3, 3);
+          const lo = broadcast(ev(A[0]), ev(A[1]), node, (x, y) => ir.bin(OP.MAX, x, y));
+          return broadcast(lo, ev(A[2]), node, (x, y) => ir.bin(OP.MIN, x, y));
+        }
+        case 'sumprod':
         case 'dot': {
           need(2, 2);
           const a = ev(A[0]), b = ev(A[1]);
-          if (a.d.length !== b.d.length) throw err(node, `dot needs equal lengths: ${a.d.length} vs ${b.d.length}`);
+          if (a.d.length !== b.d.length) throw err(node, `${name} needs equal lengths: ${a.d.length} vs ${b.d.length}`);
           return T([], [ir.sum(a.d.map((x, i) => ir.bin(OP.MUL, x, b.d[i])))]);
         }
         case 'quad': {
@@ -422,7 +438,7 @@ NadirEngine.define('model', function (E) {
     const claim = (name, kind, id) => {
       if (!name) return 'Give it a name';
       if (!isName(name)) return 'Names start with a letter and use letters, digits or _';
-      if (FUNCTIONS[name]) return `'${name}' is a built-in function`;
+      if (FUNCTIONS[name] && !SOFT.has(name)) return `'${name}' is a built-in function`;
       if (RESERVED.has(name)) return `'${name}' is a reserved word`;
       if (nameOwner.has(name)) return `'${name}' is already used`;
       nameOwner.set(name, { kind, id });

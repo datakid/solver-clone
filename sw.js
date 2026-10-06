@@ -1,4 +1,4 @@
-const VERSION = 'nadir-v3.0.0';
+const VERSION = 'nadir-v4.0.3';
 const CORE = [
   './',
   'index.html',
@@ -12,6 +12,7 @@ const CORE = [
   'js/engine/syntax.js',
   'js/engine/ir.js',
   'js/engine/model.js',
+  'js/engine/reform.js',
   'js/engine/lu.js',
   'js/engine/revised.js',
   'js/engine/lp.js',
@@ -91,14 +92,13 @@ self.addEventListener('fetch', (event) => {
   }
   event.respondWith((async () => {
     const c = await caches.open(VERSION);
-    const hit = await c.match(req, { ignoreSearch: true });
-    if (hit) return hit;
     try {
-      const res = await fetch(req);
+      const res = await fetch(req, { cache: 'no-cache' });
       if (res.ok && res.type === 'basic') c.put(req, res.clone());
       return res;
     } catch (e) {
-      return Response.error();
+      const hit = await c.match(req, { ignoreSearch: true });
+      return hit || Response.error();
     }
   })());
 });
