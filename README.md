@@ -4,6 +4,24 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## v5.3 — dual presolve, fill-aware LU, MIP restarts, conflict graph, parallel sweeps
+- **Dual presolve** (`presolve.js`).
+  - *Redundant rows*: a row is dropped when its activity bounds can never break it (e.g. `≤ 1000` when the max is 300). It is checked before columns are freed, so it never relies on a freed bound.
+  - *Implied-free columns*: when a column's only row already implies its bounds, the bounds are lifted, which avoids degenerate bound pivots. This is guarded so that no freed column's bounds were ever used for another reduction.
+  - The lifted basis is checked before use. If a freed column is non-basic, it falls back to the plain solve.
+- **Fill-reducing LU ordering** (`lu.js`). Columns are pre-ranked by their Markowitz fill potential, and Markowitz ties are broken by that rank. The factor reports `fill`.
+- **Conflict graph shared with propagation** (`mip.js`).
+  - It is built once from all "x + y ≤ 1"-type rows.
+  - Clique cuts and node propagation both use it: setting a binary to 1 fixes its neighbours to 0 and prunes contradictory nodes.
+  - Counters: `conflictPrunes` and `conflictFixes`.
+- **Root restarts.** After the root cuts and the first incumbent:
+  - Reduced-cost fixing: integers whose reduced cost exceeds the gap are fixed.
+  - Probing: each binary is tried at 1 using conflict propagation and bound propagation, and fixed to 0 if that is infeasible.
+  - If at least 10% of the integers are fixed (and at least 3), Nadir drops the cuts, re-presolves and restarts the search on the smaller model. The incumbent is kept.
+- **Parallel sweeps** (`worker-host.js`). Sweep values are split into contiguous chunks over up to `hardwareConcurrency − 1` Web Workers (max 8). Each chunk keeps its warm starts, and results stream back in order. Stop terminates them all. If workers aren't available it falls back to the single worker. When more than one worker is used, a toast reports how many and the time taken.
+- **Meta line and story.** The meta line shows `restart`. The story says how many choices were fixed at the root and how many either-or pairs ruled out options.
+- Tests: **48 engine cases**. New: dual presolve vs dense on 50 LPs (with bound checks); fill-aware LU residuals and fill bound; conflict propagation unit test plus restart/conflict B&B vs classic on 30 conflict-heavy MIPs. Parallel sweep verified in the app: 3 workers, identical results to the serial sweep, and Stop works.
+
 ## v5.2 — presolve, hypersparse solves, richer cuts, reliability branching
 - **LP presolve** (`js/engine/presolve.js`, runs before the revised simplex when Presolve is on and the model has 300+ rows and columns). It does the following:
   - Removes empty rows.
@@ -194,12 +212,12 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 
 ## Known limits
 - The LP is single-threaded JavaScript. Around 10⁴ rows takes seconds; 10⁵+ rows would need presolve for LPs, hypersparse FTRAN/BTRAN and LU fill reduction (planned next).
-- MIP has no restarts, and no conflict analysis or symmetry handling.
+- MIP has no conflict *analysis* (learning from infeasible nodes) and no symmetry handling. Restarts happen only at the root.
 - MIP sensitivity is *conditional*: it is valid with the whole-number decisions held at their best values. NLP results have no ranging.
 - Exact switches need finite ranges on everything inside the `abs`/`max`/`min` (at most 400 switches). Otherwise those models use the search engines.
 - Apple doesn't let a web page trigger Add to Home Screen on iOS, so Nadir can only guide you through it. An installed iOS app also keeps its own storage, separate from Safari tabs; export a library file to move models across.
 
 ## Recommended next steps
-- Dual presolve reductions (dominated rows, implied free columns) and LU fill-reducing column ordering.
-- MIP restarts after root fixing, plus a conflict graph shared with propagation.
-- Run multiple Web Workers for parallel sweeps.
+- Conflict analysis (learning cuts from infeasible nodes) and orbital fixing for symmetric models.
+- A parallel B&B tree search across the worker pool.
+- WASM SIMD kernels for FTRAN/BTRAN on very large LPs.

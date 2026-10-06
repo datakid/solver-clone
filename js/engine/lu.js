@@ -101,12 +101,17 @@ NadirEngine.define('lu', function (E) {
     const bOut = (j) => { const c = bCnt[j]; if (bPrev[j] >= 0) bNext[bPrev[j]] = bNext[j]; else bHead[c] = bNext[j]; if (bNext[j] >= 0) bPrev[bNext[j]] = bPrev[j]; bPrev[j] = bNext[j] = -1; };
     const colDone = new Uint8Array(m), rowDone = new Uint8Array(m);
     const recount = (j) => { if (colDone[j]) return; const c = Math.min(cP[j].length, m + 1); if (c !== bCnt[j]) { bOut(j); bIn(j, c); } };
-    for (let k = 0; k < m; k++) bIn(k, Math.min(cP[k].length, m + 1));
+    const fillScore = new Float64Array(m);
+    for (let k = 0; k < m; k++) { let s = 0; for (const i of cP[k]) s += rI[i].length - 1; fillScore[k] = s; }
+    const order = Array.from({ length: m }, (_, k) => k).sort((a, b) => fillScore[b] - fillScore[a]);
+    for (const k of order) bIn(k, Math.min(cP[k].length, m + 1));
 
     const valueAt = (i, j) => { const I = rI[i]; for (let t = 0; t < I.length; t++) if (I[t] === j) return rV[i][t]; return 0; };
     const dropFromPat = (j, i) => { const p = cP[j]; for (let t = 0; t < p.length; t++) if (p[t] === i) { p[t] = p[p.length - 1]; p.pop(); return; } };
     const colMax = (j) => { let mx = 0; for (const i of cP[j]) { const v = Math.abs(valueAt(i, j)); if (v > mx) mx = v; } return mx; };
 
+    let nnzIn = 0;
+    for (let i = 0; i < m; i++) nnzIn += rI[i].length;
     const rowQ = [];
     for (let i = 0; i < m; i++) if (rI[i].length === 1) rowQ.push(i);
 
@@ -134,7 +139,7 @@ NadirEngine.define('lu', function (E) {
             const a = Math.abs(vals[t]);
             if (a < REL_TOL * mx || a <= ABS_TOL) continue;
             const cost = (rI[pat[t]].length - 1) * (cnt - 1);
-            if (cost < best || (cost === best && a > Math.abs(bv))) { best = cost; br = pat[t]; bc = j; bv = vals[t]; }
+            if (cost < best || (cost === best && (fillScore[j] < fillScore[bc] || (fillScore[j] === fillScore[bc] && a > Math.abs(bv))))) { best = cost; br = pat[t]; bc = j; bv = vals[t]; }
           }
           if (br >= 0 && (looked >= 8 || best <= (cnt - 1) * (cnt - 1))) return [br, bc, bv];
         }
@@ -362,7 +367,7 @@ NadirEngine.define('lu', function (E) {
 
     const grown = () => uNnz + etaNnz + LrA.length + m > 3 * nnz0 + 4 * m || seq.length > 3 * m;
 
-    return { ok: true, ftran, btran, update, grown, kind: 'sparse', get nnz() { return LrA.length + uNnz + etaNnz + m; } };
+    return { ok: true, ftran, btran, update, grown, kind: 'sparse', fill: LrA.length + uNnz - (nnzIn - m), get nnz() { return LrA.length + uNnz + etaNnz + m; } };
   }
 
   function factor(m, cols, opt) {

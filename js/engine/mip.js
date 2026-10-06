@@ -333,14 +333,13 @@ NadirEngine.define('mip', function (E) {
     return cuts.slice(0, maxCuts);
   }
 
-  function cliqueCuts(P, isInt, x, lo, up, maxCuts) {
-    const n = P.n;
+  function conflictGraph(P, isInt, lo, up) {
     const isBin = (j) => isInt[j] && lo[j] === 0 && up[j] === 1;
     const adj = new Map();
-    const link = (a, b) => { if (!adj.has(a)) adj.set(a, new Set()); if (!adj.has(b)) adj.set(b, new Set()); adj.get(a).add(b); adj.get(b).add(a); };
+    const link = (a, b) => { if (a === b) return; if (!adj.has(a)) adj.set(a, new Set()); if (!adj.has(b)) adj.set(b, new Set()); adj.get(a).add(b); adj.get(b).add(a); };
     let edges = 0;
     for (const r of P.rows) {
-      if (r.cut || r.op === '=' || r.idx.length < 2 || r.idx.length > 60) continue;
+      if (r.op === '=' || r.idx.length < 2 || r.idx.length > 60) continue;
       const s = r.op === '<=' ? 1 : -1;
       let b = r.rhs * s, ok = true;
       const bins = [];
@@ -359,7 +358,28 @@ NadirEngine.define('mip', function (E) {
         }
       }
     }
-    if (!edges) return [];
+    return { adj, edges };
+  }
+
+  function conflictPropagate(G, lo, up) {
+    if (!G || !G.edges) return { infeasible: false, changes: 0 };
+    let changes = 0;
+    for (const [j, nb] of G.adj) {
+      if (lo[j] < 0.5) continue;
+      for (const k of nb) {
+        if (lo[k] > 0.5) return { infeasible: true, changes };
+        if (up[k] > 0.5) { up[k] = 0; changes++; }
+      }
+    }
+    return { infeasible: false, changes };
+  }
+
+  function cliqueCuts(P, isInt, x, lo, up, maxCuts, G0) {
+    const G = G0 || conflictGraph({ rows: P.rows.filter((r) => !r.cut) }, isInt, lo, up);
+    return G.edges ? cliqueFromGraph(G.adj, x, maxCuts) : [];
+  }
+
+  function cliqueFromGraph(adj, x, maxCuts) {
     const cuts = [], seen = new Set();
     const order = [...adj.keys()].filter((j) => x[j] > 1e-6).sort((p, q) => x[q] - x[p]);
     for (const s0 of order) {
@@ -515,7 +535,10 @@ NadirEngine.define('mip', function (E) {
     if (root.status === 'infeasible') return { status: 'infeasible', nodes: 1, iterations: pivots, stats };
     if (root.status === 'unbounded') return { status: 'unbounded', nodes: 1, iterations: pivots, stats };
 
+    let G = n <= 20000 ? conflictGraph(P, isInt, P.lower, P.upper) : null;
+    stats.conflictEdges = G ? G.edges : 0;
     const cutOk = o.cuts !== false && n <= 3000 && P.rows.length <= 3000;
+    for (let pass = 0; pass < 2; pass++) {
     if (cutOk) {
       const maxRounds = 4;
       let lastObj = root.obj * dir;
@@ -524,7 +547,7 @@ NadirEngine.define('mip', function (E) {
         const cap = Math.min(40, Math.max(8, n >> 2));
         const cov = coverCuts(P, isInt, root.x, P.lower, P.upper, cap);
         const flo = flowCuts(P, isInt, root.x, P.lower, P.upper, cap);
-        const clq = cliqueCuts(P, isInt, root.x, P.lower, P.upper, cap);
+        const clq = cliqueCuts(P, isInt, root.x, P.lower, P.upper, cap, G);
         const gom = gomoryCuts(P, isInt, root.state, root.x, cap);
         const cuts = clq.concat(cov, flo, gom);
         if (!cuts.length) break;
@@ -542,6 +565,40 @@ NadirEngine.define('mip', function (E) {
     }
     if (fractional(root.x) < 0) offer(root);
     else if (offer(roundAndFix(P, isInt, root.x, P.lower, P.upper, deadline))) stats.heuristic++;
+    if (pass > 0 || o.restart === false || !inc || fractional(root.x) < 0 || !root.reduced || Date.now() > deadline) break;
+    const lo2 = Float64Array.from(P.lower), up2 = Float64Array.from(P.upper);
+    const gapAbs = incVal - root.obj * dir;
+    let fixed = 0, nInt = 0;
+    for (let j = 0; j < n; j++) {
+      if (!isInt[j] || lo2[j] === up2[j]) continue;
+      nInt++;
+      const d = root.reduced[j] * dir;
+      const xj = root.x[j];
+      if (Math.abs(xj - lo2[j]) < 1e-9 && d > 1e-9 && d > gapAbs + 1e-7) { up2[j] = lo2[j]; fixed++; }
+      else if (Math.abs(xj - up2[j]) < 1e-9 && d < -1e-9 && -d > gapAbs + 1e-7) { lo2[j] = up2[j]; fixed++; }
+    }
+    if (G) {
+      for (const [j, nb] of G.adj) {
+        if (up2[j] < 0.5 || lo2[j] > 0.5) continue;
+        const tl = Float64Array.from(lo2), tu = Float64Array.from(up2);
+        tl[j] = 1;
+        if (conflictPropagate(G, tl, tu).infeasible || propagate(P.rows, tl, tu, isInt, { passes: 2 }).infeasible) { up2[j] = 0; fixed++; }
+      }
+      conflictPropagate(G, lo2, up2);
+    }
+    if (!nInt || fixed < Math.max(3, 0.1 * nInt)) break;
+    const base = Object.assign({}, P, { rows: P.rows.filter((r) => !r.cut), lower: lo2, upper: up2 });
+    const pre = o.presolve !== false ? presolve(base, isInt) : { infeasible: false, P: base };
+    if (pre.infeasible) break;
+    const Pn = pre.P;
+    const rr = E.solveLP(Pn, { deadline, maxIter: o.maxIter });
+    tally(rr);
+    if (rr.status !== 'optimal') break;
+    P = Pn; root = rr;
+    stats.restarts = (stats.restarts || 0) + 1; stats.restartFixed = fixed;
+    G = conflictGraph(P, isInt, P.lower, P.upper);
+    stats.conflictEdges = G.edges;
+    }
 
     const keepBasis = (P.n + P.rows.length) <= 20000;
     const stack = [];
@@ -577,6 +634,11 @@ NadirEngine.define('mip', function (E) {
       nodes++;
       const pr = propagate(P.rows, nd.lo, nd.hi, isInt, { passes: 2 });
       if (pr.infeasible) continue;
+      if (G && G.edges) {
+        const cp = conflictPropagate(G, nd.lo, nd.hi);
+        if (cp.infeasible) { stats.conflictPrunes = (stats.conflictPrunes || 0) + 1; continue; }
+        if (cp.changes) { stats.conflictFixes = (stats.conflictFixes || 0) + cp.changes; if (propagate(P.rows, nd.lo, nd.hi, isInt, { passes: 1 }).infeasible) continue; }
+      }
       const r = E.solveLP(P, { lower: nd.lo, upper: nd.hi, deadline, maxIter: o.maxIter, basis: nd.basis });
       nd.basis = null;
       if (r.warm) stats.warm++;
@@ -613,5 +675,7 @@ NadirEngine.define('mip', function (E) {
   E.coverCuts = coverCuts;
   E.flowCuts = flowCuts;
   E.cliqueCuts = cliqueCuts;
+  E.conflictGraph = conflictGraph;
+  E.conflictPropagate = conflictPropagate;
   E.solveMIP = mip;
 });

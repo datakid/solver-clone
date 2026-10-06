@@ -257,8 +257,16 @@
       csv.hidden = true;
       paint();
       try {
-        await N.WorkerHost.sweep(JSON.parse(JSON.stringify(S.model)), S.solverSettings(), sel.value, vals, (step) => { results.push(step); paint(); });
+        const t0 = performance.now();
+        let raf = 0;
+        const res = await N.WorkerHost.sweep(JSON.parse(JSON.stringify(S.model)), S.solverSettings(), sel.value, vals, (step) => {
+          results.push(step);
+          results.sort((p, q) => p.i - q.i);
+          if (!raf) raf = requestAnimationFrame(() => { raf = 0; paint(); });
+        });
+        cancelAnimationFrame(raf); paint();
         csv.hidden = false;
+        if (res && res.workers > 1) N.toast(`Swept ${vals.length} values on ${res.workers} parallel workers in ${Math.round(performance.now() - t0)} ms`);
       } catch (e) {
         if (!e.stopped) N.toast(e.message, { kind: 'bad' });
         csv.hidden = !results.length;

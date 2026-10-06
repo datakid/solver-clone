@@ -577,6 +577,80 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
+        name: 'v5.3 · Dual presolve: redundant rows and implied-free columns keep answers exact', run() {
+          const rand = E.mulberry32(303);
+          const bad = [];
+          let rowsGone = 0, freed = 0;
+          for (let t = 0; t < 50 && bad.length < 3; t++) {
+            const n = 8 + Math.floor(rand() * 10), m = 5 + Math.floor(rand() * 8);
+            const rows = [];
+            for (let i = 0; i < m; i++) {
+              const idx = [], val = [];
+              for (let j = 0; j < n; j++) if (rand() < 0.45) { idx.push(j); val.push(1 + Math.round(rand() * 6)); }
+              rows.push({ idx, val, op: rand() < 0.85 ? '<=' : '>=', rhs: rand() < 0.25 ? 1000 : 15 + Math.round(rand() * 40) });
+            }
+            for (let j = 0; j < 3; j++) rows.push({ idx: [j, n - 1 - j], val: [1, 1], op: '<=', rhs: 30 });
+            const P = { n, c: Float64Array.from({ length: n }, () => 1 + Math.round(rand() * 9)), c0: 0, rows, lower: new Float64Array(n), upper: Float64Array.from({ length: n }, () => 4 + Math.round(rand() * 10)), maximize: true };
+            const a = E.solveDense(P, {});
+            const b = E.solveLP(P, { presolve: 'force' });
+            if (b.presolve) { rowsGone += b.presolve.rows; freed += b.presolve.freed || 0; }
+            if (a.status !== b.status || (a.status === 'optimal' && !close(a.obj, b.obj, 1e-6))) bad.push(`#${t} ${a.status} ${a.obj} vs ${b.status} ${b.obj}`);
+            if (b.x) for (let j = 0; j < n; j++) if (b.x[j] < P.lower[j] - 1e-7 || b.x[j] > P.upper[j] + 1e-7) { bad.push(`#${t} bound broken on x${j}`); break; }
+          }
+          return (!bad.length && rowsGone > 20) || (bad.join('; ') || `rows removed ${rowsGone}, freed ${freed}`);
+        }
+      },
+      {
+        name: 'v5.3 · Fill-reducing LU ordering keeps fill no worse and solves exact', run() {
+          const rand = E.mulberry32(404);
+          const m = 600, cols = [];
+          for (let k = 0; k < m; k++) {
+            const idx = [k], val = [5 + rand()];
+            if (k % 50 === 0) for (let i = 0; i < m; i += 7) if (i !== k) { idx.push(i); val.push(0.1 + rand() * 0.2); }
+            else for (let t = 0; t < 2; t++) { const i = Math.floor(rand() * m); if (i !== k) { idx.push(i); val.push(rand() - 0.5); } }
+            cols.push({ idx, val });
+          }
+          const f = E.luFactor(m, cols, { force: 'sparse' });
+          if (!f.ok) return 'singular';
+          const b = Float64Array.from({ length: m }, () => rand());
+          const x = f.ftran(b), Bx = new Float64Array(m);
+          cols.forEach((c, k) => c.idx.forEach((i, t) => { Bx[i] += c.val[t] * x[k]; }));
+          let res = 0;
+          for (let i = 0; i < m; i++) res = Math.max(res, Math.abs(Bx[i] - b[i]));
+          let nnzIn = 0;
+          cols.forEach((c) => { nnzIn += c.idx.length; });
+          return (res < 1e-9 && f.nnz <= 2.5 * nnzIn) || `residual ${res}, nnz ${f.nnz} vs input ${nnzIn}`;
+        }
+      },
+      {
+        name: 'v5.3 · Conflict graph propagation, root restarts and MIP agreement', run() {
+          const G = E.conflictGraph({ rows: [{ idx: [0, 1], val: [1, 1], op: '<=', rhs: 1 }, { idx: [1, 2], val: [1, 1], op: '<=', rhs: 1 }] }, Uint8Array.of(1, 1, 1), new Float64Array(3), Float64Array.of(1, 1, 1));
+          const lo = Float64Array.of(0, 1, 0), up = Float64Array.of(1, 1, 1);
+          const pr = E.conflictPropagate(G, lo, up);
+          const lo2 = Float64Array.of(1, 1, 0), up2 = Float64Array.of(1, 1, 1);
+          const pr2 = E.conflictPropagate(G, lo2, up2);
+          if (!(G.edges === 2 && up[0] === 0 && up[2] === 0 && pr.changes === 2 && pr2.infeasible)) return 'propagation wrong';
+          const rand = E.mulberry32(505);
+          const bad = [];
+          let restarts = 0, prunes = 0;
+          for (let t = 0; t < 30 && bad.length < 3; t++) {
+            const n = 14 + Math.floor(rand() * 8), rows = [];
+            for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) if (rand() < 0.18) rows.push({ idx: [a, b], val: [1, 1], op: '<=', rhs: 1 });
+            const w = Array.from({ length: n }, () => 1 + Math.round(rand() * 9));
+            rows.push({ idx: w.map((_, j) => j), val: w, op: '<=', rhs: Math.round(w.reduce((s, x) => s + x, 0) / 3) });
+            const c = Float64Array.from({ length: n }, (_, j) => (j < 3 ? 0.5 : 2 + Math.round(rand() * 20)));
+            const P = { n, c, c0: 0, rows, lower: new Float64Array(n), upper: new Float64Array(n).fill(1), maximize: true };
+            const isInt = new Uint8Array(n).fill(1);
+            const a = E.branchAndBoundClassic(P, isInt, { gap: 0, deadline: Date.now() + 8000 });
+            const b = E.solveMIP(P, isInt, { gap: 0 });
+            restarts += b.stats.restarts || 0; prunes += (b.stats.conflictPrunes || 0) + (b.stats.conflictFixes || 0);
+            if (a.status !== b.status || (a.status === 'optimal' && !close(a.obj, b.obj, 1e-6))) bad.push(`#${t} ${a.status} ${a.obj} vs ${b.status} ${b.obj}`);
+            if (b.x) for (const r of rows) { let s = 0; r.idx.forEach((j, k) => { s += r.val[k] * b.x[j]; }); if (s > r.rhs + 1e-6) { bad.push(`#${t} infeasible incumbent`); break; } }
+          }
+          return !bad.length || bad.join('; ') + ` (restarts ${restarts}, conflict uses ${prunes})`;
+        }
+      },
+      {
         name: 'v5 · Sparse 6,000×6,000 LP with Forrest–Tomlin updates', run() {
           const rand = E.mulberry32(23);
           const m = 6000, n = 6000;

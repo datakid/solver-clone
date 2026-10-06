@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>t</title></head><body>
+<iframe id="f" src="index.html?template=bakery" style="width:800px;height:600px"></iframe>
+<script>
+document.getElementById('f').onload = function () {
+  var w = this.contentWindow;
+  setTimeout(async function () {
+    try {
+      var N = w.Nadir, m = JSON.parse(JSON.stringify(N.Store.model)), s = N.Store.solverSettings();
+      var vals = Array.from({ length: 12 }, function (_, i) { return 20 + i * 5; });
+      var seen = 0;
+      var t0 = performance.now();
+      var par = await N.WorkerHost.sweep(m, s, 'ovenHours', vals, function () { seen++; });
+      var t1 = performance.now();
+      var ser = w.Engine.sweep(m, s, 'ovenHours', vals);
+      var same = par.steps.length === ser.length && par.steps.every(function (p, i) { return p.i === i && Math.abs(p.objective - ser[i].objective) < 1e-6; });
+      console.log('workers=' + par.workers + ' pool=' + N.WorkerHost.poolSize + ' steps=' + par.steps.length + ' events=' + seen + ' same=' + same + ' ms=' + Math.round(t1 - t0) + ' busy=' + N.WorkerHost.busy);
+      var p2 = N.WorkerHost.sweep(m, s, 'ovenHours', vals, function () {});
+      N.WorkerHost.stop();
+      try { await p2; console.log('stop: resolved?'); } catch (e) { console.log('stop ok ' + !!e.stopped + ' busy=' + N.WorkerHost.busy); }
+    } catch (e) { console.log('ERR ' + e.message); }
+  }, 1500);
+};
+</script></body></html>

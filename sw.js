@@ -1,4 +1,4 @@
-const VERSION = 'nadir-v5.2.0';
+const VERSION = 'nadir-v5.3.0';
 const CORE = [
   './',
   'index.html',

@@ -17,7 +17,8 @@ NadirEngine.define('presolve', function (E) {
     rows.forEach((r, i) => { for (const j of r.m.keys()) cols[j].add(i); });
     const alive = new Uint8Array(n).fill(1);
     const loSrc = new Int32Array(n).fill(-1), upSrc = new Int32Array(n).fill(-1);
-    const recs = [], dropped = [];
+    const recs = [], dropped = [], implied = [];
+    const freed = new Uint8Array(n), used = new Uint8Array(n);
     const tl = (v) => 1e-9 * Math.max(1, Math.abs(v));
     let bad = false;
 
@@ -76,6 +77,25 @@ NadirEngine.define('presolve', function (E) {
           recs.push({ kind: 'dbl', i, j, k, id, loFrom, upFrom }); changed++;
         }
       }
+      for (let i = 0; i < m && !bad; i++) {
+        const r = rows[i];
+        if (!r.alive || r.op === '=' || r.m.size < 2) continue;
+        let mn = 0, mx = 0, mnInf = 0, mxInf = 0;
+        for (const [j, a] of r.m) {
+          const l = lo[j], u = up[j];
+          if (a > 0) { if (l === -Infinity) mnInf++; else mn += a * l; if (u === Infinity) mxInf++; else mx += a * u; }
+          else { if (u === Infinity) mnInf++; else mn += a * u; if (l === -Infinity) mxInf++; else mx += a * l; }
+        }
+        const t = 1e-9 * Math.max(1, Math.abs(r.rhs));
+        if (r.op === '<=' ? (mnInf === 0 && mn > r.rhs + 1e-7 * Math.max(1, Math.abs(r.rhs))) : (mxInf === 0 && mx < r.rhs - 1e-7 * Math.max(1, Math.abs(r.rhs)))) { bad = true; break; }
+        if (r.op === '<=' ? (mxInf === 0 && mx <= r.rhs + t) : (mnInf === 0 && mn >= r.rhs - t)) {
+          let ok = true;
+          for (const j of r.m.keys()) if (freed[j]) { ok = false; break; }
+          if (!ok) continue;
+          for (const j of r.m.keys()) used[j] = 1;
+          killRow(i); recs.push({ kind: 'empty', i }); changed++;
+        }
+      }
       for (let j = 0; j < n && !bad; j++) {
         if (!alive[j]) continue;
         if (lo[j] === up[j]) { dropCol(j, LOW); changed++; continue; }
@@ -96,6 +116,28 @@ NadirEngine.define('presolve', function (E) {
         }
         if (dec && cd >= 0 && lo[j] > -Infinity) { dropCol(j, LOW); changed++; }
         else if (inc && cd <= 0 && up[j] < Infinity) { dropCol(j, UPP); changed++; }
+        else if (cols[j].size === 1 && (lo[j] > -Infinity || up[j] < Infinity) && !freed[j] && !used[j] && loSrc[j] < 0 && upSrc[j] < 0) {
+          const i = cols[j].values().next().value, r = rows[i], a = r.m.get(j);
+          if (r.op === '=' || Math.abs(a) < 1e-6) continue;
+          let clash = false;
+          for (const k of r.m.keys()) if (k !== j && freed[k]) { clash = true; break; }
+          if (clash) continue;
+          let mn = 0, mx = 0, mnInf = 0, mxInf = 0;
+          for (const [k, b] of r.m) {
+            if (k === j) continue;
+            if (b > 0) { if (lo[k] === -Infinity) mnInf++; else mn += b * lo[k]; if (up[k] === Infinity) mxInf++; else mx += b * up[k]; }
+            else { if (up[k] === Infinity) mnInf++; else mn += b * up[k]; if (lo[k] === -Infinity) mxInf++; else mx += b * lo[k]; }
+          }
+          let iLo = -Infinity, iUp = Infinity;
+          if (r.op === '<=') { if (mnInf === 0) { const v = (r.rhs - mn) / a; if (a > 0) iUp = v; else iLo = v; } }
+          else if (mxInf === 0) { const v = (r.rhs - mx) / a; if (a > 0) iLo = v; else iUp = v; }
+          const tol = 1e-9;
+          if (iLo >= lo[j] - tol * Math.max(1, Math.abs(lo[j])) && iUp <= up[j] + tol * Math.max(1, Math.abs(up[j]))) {
+            freed[j] = 1; implied.push({ j, lo: lo[j], up: up[j] });
+            for (const k of r.m.keys()) if (k !== j) used[k] = 1;
+            lo[j] = -Infinity; up[j] = Infinity; changed++;
+          }
+        }
       }
       if (!changed) break;
     }
@@ -113,7 +155,7 @@ NadirEngine.define('presolve', function (E) {
     });
     return {
       P: { n: colMap.length, c: Float64Array.from(colMap, (j) => c[j]), c0, rows: R, lower: Float64Array.from(colMap, (j) => lo[j]), upper: Float64Array.from(colMap, (j) => up[j]), maximize: P.maximize },
-      colMap, rowMap, recs, dropped, loSrc, upSrc, n, m, ops: P.rows.map((r) => r.op)
+      colMap, rowMap, recs, dropped, implied, loSrc, upSrc, n, m, ops: P.rows.map((r) => r.op)
     };
   }
 
@@ -122,6 +164,7 @@ NadirEngine.define('presolve', function (E) {
     const stat = new Int8Array(N).fill(-1);
     for (let t = 0; t < rb.stat.length; t++) stat[t < n2 ? colMap[t] : n + rowMap[t - n2]] = rb.stat[t];
     for (const d of Z.dropped) stat[d.j] = d.side;
+    for (const f of Z.implied) if (stat[f.j] === FREE) return null;
     for (let q = Z.recs.length - 1; q >= 0; q--) {
       const r = Z.recs[q], s = n + r.i;
       if (r.kind === 'empty') { stat[s] = BASIC; continue; }
@@ -158,7 +201,7 @@ NadirEngine.define('presolve', function (E) {
     if (!basis) { E.__psWhy = 'lift'; return null; }
     try { fin = E.solveRevised(P, Object.assign({}, o, { basis, presolve: false })); } catch (e) { return null; }
     if (fin.status !== 'optimal') { E.__psWhy = 'fin:' + fin.status; return null; }
-    fin.presolve = { rows: m - Z.P.rows.length, cols: n - Z.P.n, reducedPivots: rr.iterations, cleanupPivots: fin.iterations };
+    fin.presolve = { rows: m - Z.P.rows.length, cols: n - Z.P.n, freed: Z.implied.length, reducedPivots: rr.iterations, cleanupPivots: fin.iterations };
     fin.iterations += rr.iterations;
     fin.dual = (fin.dual || 0) + (rr.dual || 0);
     return fin;

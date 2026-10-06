@@ -240,6 +240,7 @@
       if (r.engine === 'bb' && r.mip && r.pivots != null) bits.push(pivTxt(r.pivots, r.mip.dualPivots));
       if (r.lpPresolve && (r.lpPresolve.rows || r.lpPresolve.cols)) bits.push(`presolve −${fmt(r.lpPresolve.rows)} rows −${fmt(r.lpPresolve.cols)} cols`);
       if (r.engine === 'bb' && r.mip && r.mip.strong) bits.push(`${fmt(r.mip.strong)} strong probes`);
+      if (r.engine === 'bb' && r.mip && r.mip.restarts) bits.push(`${r.mip.restarts === 1 ? 'restart' : fmt(r.mip.restarts) + ' restarts'}`);
       if (r.pwl && r.pwl.pieces) bits.push(`${fmt(r.pwl.pieces)} corner ${r.pwl.pieces === 1 ? 'piece' : 'pieces'} linearized`);
       if (r.pwl && r.pwl.switches) bits.push(`${fmt(r.pwl.switches)} ${r.pwl.switches === 1 ? 'switch' : 'switches'}`);
       if (r.engine === 'bb' && r.nodes != null) bits.push(`${fmt(r.nodes)} ${r.nodes === 1 ? 'node' : 'nodes'}`);
@@ -336,11 +337,13 @@
       if (r.warmStart) P.push('<span class="faint">Started from the previous answer to get here faster.</span>');
       if (r.engine === 'alm') P.push(`<span class="faint">Nonlinear models can have more than one valley; Nadir compared ${plural(r.starts || 1, 'starting point')} and kept the best.</span>`);
       if (r.engine === 'de') P.push(`<span class="faint">Found by an evolutionary search over ${plural(r.generations || 0, 'generation')}${r.polished ? ', then polished' : ''}.</span>`);
-      if (r.engine === 'bb' && r.mip && (r.mip.cuts || (r.mip.presolve && (r.mip.presolve.rowsRemoved || r.mip.presolve.boundsTightened)))) {
+      if (r.engine === 'bb' && r.mip && (r.mip.cuts || r.mip.restarts || r.mip.conflictPrunes || r.mip.conflictFixes || (r.mip.presolve && (r.mip.presolve.rowsRemoved || r.mip.presolve.boundsTightened)))) {
         const bits = [];
         const pr = r.mip.presolve;
         if (pr && pr.rowsRemoved) bits.push(`presolve dropped ${plural(pr.rowsRemoved, 'redundant rule')}`);
         if (pr && pr.boundsTightened) bits.push(`tightened ${plural(pr.boundsTightened, 'bound')}`);
+        if (r.mip.restarts) bits.push(`fixed ${plural(r.mip.restartFixed || 0, 'whole-number choice')} at the root and restarted on the smaller model`);
+        if (r.mip.conflictPrunes || r.mip.conflictFixes) bits.push(`used ${plural(r.mip.conflictEdges || 0, 'either-or pair')} to rule out ${plural((r.mip.conflictPrunes || 0) + (r.mip.conflictFixes || 0), 'option')} during the search`);
         if (r.mip.cuts) {
           const kinds = [r.mip.cliques ? plural(r.mip.cliques, 'clique') : '', r.mip.covers ? plural(r.mip.covers, 'knapsack cover') : '', r.mip.flows ? plural(r.mip.flows, 'flow cover') : '', r.mip.gomory ? `${fmt(r.mip.gomory)} Gomory` : ''].filter(Boolean);
           bits.push(`added ${plural(r.mip.cuts, 'cutting plane')}${kinds.length ? ` (${kinds.join(', ')})` : ''}`);
