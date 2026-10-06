@@ -243,6 +243,7 @@
       if (r.parallel && !r.parallel.noGain) bits.push(`${r.parallel.workers} workers`);
       if (/simd/.test(r.lu || '') || r.simd) bits.push('SIMD');
       if (r.parallel && r.parallel.steals) bits.push(`${fmt(r.parallel.steals)} ${r.parallel.steals === 1 ? 'steal' : 'steals'}${r.parallel.shared ? ' · shared bound' : ''}`);
+      if (r.engine === 'bb' && r.mip && r.mip.automorphisms) bits.push(`${fmt(r.mip.automorphisms)} ${r.mip.automorphisms === 1 ? 'symmetry' : 'symmetries'}`);
       if (r.engine === 'bb' && r.mip && r.mip.orbitopes) bits.push(`${fmt(r.mip.orbitopes)} ${r.mip.orbitopes === 1 ? 'orbitope' : 'orbitopes'}`);
       if (r.engine === 'bb' && r.mip && r.mip.orbits) bits.push(`${fmt(r.mip.orbits)} ${r.mip.orbits === 1 ? 'orbit' : 'orbits'}`);
       if (r.engine === 'bb' && r.mip && r.mip.learned) bits.push(`${fmt(r.mip.learned)} learned`);

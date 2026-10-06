@@ -4,6 +4,26 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## v5.6 — final release: general symmetry detection
+- **Automorphism detection** (`mip.js` `autRows`), used for models without an orbitope structure (n ≤ 2,000, nnz ≤ 8,000, capped work budget):
+  - Colour refinement (1-WL) runs on the variable–constraint graph. Colours take cost, bounds, integrality, row sense/RHS and coefficients into account.
+  - For each colour class, Nadir tries to map its first member onto each of the others (individualise both, refine both in step, compare colour histograms, keep individualising until every colour is unique).
+  - Every candidate permutation is **verified exactly**: it must preserve costs, bounds and integrality and map the multiset of rows onto itself.
+  - Each verified generator σ adds one lexicographic-leader row xᵢ ≥ x_σ(ᵢ) on its first moved variable. That is valid for any permutation, so the optimum is preserved.
+- This catches symmetries the simpler checks miss: rings, mirrored or duplicated sub-networks, and identical-but-relabelled components.
+- The meta line shows `N symmetries`.
+- Tests: **56 engine cases** (new: cycles C5–C9 and 14 mirrored random graphs vs brute force, with symmetry on and off, plus a check that no permutation is wrongly found on a near-asymmetric graph). The **full in-app suite passes 55/55** (engine, Web Worker round-trip, all 13 templates through the worker, live-check budget).
+
+### Project status
+Nadir is feature-complete for this cycle. The engine includes:
+- presolved revised/dual simplex with a Forrest–Tomlin LU and WASM SIMD kernels;
+- Branch & Bound with clique, cover, flow and Gomory cuts, reliability branching, restarts, conflict learning and symmetry handling (orbits, orbitopes, automorphisms);
+- exact rewriting of corners and big-M switches;
+- nonlinear engines (ALM + L-BFGS, Differential Evolution);
+- parallel work-stealing search and parallel sweeps.
+
+The UI covers guided setup, plain-English explanations, sensitivity analysis, offline use and installing on Safari.
+
 ## v5.5 — work stealing, WASM sparse solves, orbitopes (stable release)
 - **Work-stealing parallel B&B** (`worker-host.js` `solveSteal`, used automatically by **Solve** for hard MIPs).
   - A task queue feeds up to 4 workers.
@@ -252,4 +272,4 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 ## Recommended next steps
 - Supernode detection in the sparse LU, so it can use dense SIMD blocks.
 - Keep the WASM U-solve after Forrest–Tomlin updates (patch the CSR in place).
-- Graph-automorphism symmetry detection (a nauty-style refinement) beyond orbitopes.
+- Orbital fixing in the tree, using the detected automorphism generators (today they're only used as root ordering rows).

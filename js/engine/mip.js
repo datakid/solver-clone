@@ -464,6 +464,95 @@ NadirEngine.define('mip', function (E) {
     return { rows, used, groups: count };
   }
 
+  function autRows(P, isInt) {
+    const n = P.n, R = P.rows.filter((r) => !r.cut), m = R.length;
+    const out = { rows: [], gens: 0 };
+    let nnz = 0;
+    for (const r of R) nnz += r.idx.length;
+    if (n < 3 || n > 2000 || !m || nnz > 8000) return out;
+    let work = 0;
+    const LIMIT = 3e6;
+    const ids = new Map();
+    const id = (s) => { let v = ids.get(s); if (v === undefined) { v = ids.size; ids.set(s, v); } return v; };
+    const vAdj = Array.from({ length: n }, () => []);
+    R.forEach((r, i) => r.idx.forEach((j, t) => vAdj[j].push(i, r.val[t])));
+    const classes = (a) => new Set(a).size;
+    function refine(S) {
+      let k = classes(S.v) + classes(S.r);
+      for (let it = 0; it < 40; it++) {
+        const nv = new Array(n), nr = new Array(m);
+        for (let i = 0; i < m; i++) { const r = R[i], p = []; for (let t = 0; t < r.idx.length; t++) p.push(S.v[r.idx[t]] + '*' + r.val[t]); p.sort(); nr[i] = id('R' + S.r[i] + '[' + p.join(',')); work += p.length + 1; }
+        for (let j = 0; j < n; j++) { const a = vAdj[j], p = []; for (let t = 0; t < a.length; t += 2) p.push(nr[a[t]] + '*' + a[t + 1]); p.sort(); nv[j] = id('V' + S.v[j] + '[' + p.join(',')); work += p.length + 1; }
+        S.v = nv; S.r = nr;
+        const k2 = classes(nv) + classes(nr);
+        if (k2 === k) break;
+        k = k2;
+      }
+    }
+    const keyOf = (idx, r) => r.op + r.rhs + '|' + idx.map((j, t) => j + ':' + r.val[t]).sort().join(',');
+    const rowCount = new Map();
+    for (const r of R) { const k = keyOf(r.idx, r); rowCount.set(k, (rowCount.get(k) || 0) + 1); }
+    const verify = (s) => {
+      const hit = new Uint8Array(n);
+      for (let j = 0; j < n; j++) {
+        const q = s[j];
+        if (q == null || hit[q]) return false;
+        hit[q] = 1;
+        if ((P.c[j] || 0) !== (P.c[q] || 0) || P.lower[j] !== P.lower[q] || P.upper[j] !== P.upper[q] || !isInt[j] !== !isInt[q]) return false;
+      }
+      const left = new Map(rowCount);
+      for (const r of R) { const k = keyOf(r.idx.map((j) => s[j]), r); const c = left.get(k); if (!c) return false; left.set(k, c - 1); }
+      return true;
+    };
+    const S0 = { v: Array.from({ length: n }, (_, j) => id('v' + (P.c[j] || 0) + '|' + P.lower[j] + '|' + P.upper[j] + '|' + (isInt[j] ? 1 : 0))), r: R.map((r) => id('r' + r.op + '|' + r.rhs)) };
+    refine(S0);
+    const hist = (a) => a.slice().sort((x, y) => x - y).join(',');
+    const tryMap = (a, b) => {
+      const A = { v: S0.v.slice(), r: S0.r.slice() }, B = { v: S0.v.slice(), r: S0.r.slice() };
+      const t0 = id('I0|' + A.v[a]);
+      A.v[a] = t0; B.v[b] = t0;
+      for (let d = 1; d <= n && work < LIMIT; d++) {
+        refine(A); refine(B);
+        work += 2 * n;
+        if (hist(A.v) !== hist(B.v) || hist(A.r) !== hist(B.r)) return null;
+        const cnt = new Map();
+        for (const c of A.v) cnt.set(c, (cnt.get(c) || 0) + 1);
+        let pick = -1;
+        for (const [c, k] of cnt) if (k > 1 && (pick < 0 || c < pick)) pick = c;
+        if (pick < 0) {
+          const where = new Map();
+          B.v.forEach((c, j) => where.set(c, j));
+          const s = A.v.map((c) => where.get(c));
+          return verify(s) ? s : null;
+        }
+        const tag = id('I' + d + '|' + pick);
+        A.v[A.v.indexOf(pick)] = tag; B.v[B.v.indexOf(pick)] = tag;
+      }
+      return null;
+    };
+    const byC = new Map();
+    S0.v.forEach((c, j) => { if (!byC.has(c)) byC.set(c, []); byC.get(c).push(j); });
+    const seen = new Set();
+    let tries = 0;
+    for (const cls of byC.values()) {
+      if (cls.length < 2) continue;
+      for (let t = 1; t < cls.length && tries < 40 && work < LIMIT; t++) {
+        tries++;
+        const s = tryMap(cls[0], cls[t]);
+        if (!s) continue;
+        let i0 = -1;
+        for (let j = 0; j < n; j++) if (s[j] !== j) { i0 = j; break; }
+        if (i0 < 0) continue;
+        out.gens++;
+        const key = i0 + '>' + s[i0];
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.rows.push({ idx: [i0, s[i0]], val: [1, -1], op: '>=', rhs: 0, sym: true });
+      }
+    }
+    return out;
+  }
+
   function orbitRows(P, isInt, skip) {
     const n = P.n;
     const sig = Array.from({ length: n }, () => []);
@@ -525,8 +614,9 @@ NadirEngine.define('mip', function (E) {
     if (o.symmetry !== false) {
       const ot = orbitopeRows(P, isInt);
       const sym = orbitRows(P, isInt, ot.used);
-      const extra = ot.rows.concat(sym.rows);
-      if (extra.length) { P = Object.assign({}, P, { rows: P.rows.concat(extra) }); stats.orbits = sym.orbits; stats.orbitVars = sym.vars; stats.orbitopes = ot.groups; stats.orbitopeRows = ot.rows.length; }
+      const aut = ot.groups ? { rows: [], gens: 0 } : autRows(P, isInt);
+      const extra = ot.rows.concat(sym.rows, aut.rows);
+      if (extra.length) { P = Object.assign({}, P, { rows: P.rows.concat(extra) }); stats.orbits = sym.orbits; stats.orbitVars = sym.vars; stats.orbitopes = ot.groups; stats.orbitopeRows = ot.rows.length; stats.automorphisms = aut.gens; }
     }
     let nodes = 0, pivots = 0;
     let inc = null, incVal = Infinity;
@@ -830,6 +920,7 @@ NadirEngine.define('mip', function (E) {
   E.conflictGraph = conflictGraph;
   E.orbitRows = orbitRows;
   E.orbitopeRows = orbitopeRows;
+  E.autRows = autRows;
   E.conflictPropagate = conflictPropagate;
   E.solveMIP = mip;
 });

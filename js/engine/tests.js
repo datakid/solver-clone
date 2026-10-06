@@ -758,6 +758,37 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
+        name: 'v5.6 · Automorphism detection (colour refinement + verified permutations) keeps the optimum', run() {
+          const bad = [];
+          const rand = E.mulberry32(919);
+          let gens = 0;
+          const build = (n, edges, w) => ({ n, c: Float64Array.from(w), c0: 0, rows: edges.map(([a, b]) => ({ idx: [a, b], val: [1, 1], op: '<=', rhs: 1 })), lower: new Float64Array(n), upper: new Float64Array(n).fill(1), maximize: true });
+          const brute = (P) => { let best = -Infinity; for (let mask = 0; mask < (1 << P.n); mask++) { let ok = true; for (const r of P.rows) if (((mask >> r.idx[0]) & 1) && ((mask >> r.idx[1]) & 1)) { ok = false; break; } if (!ok) continue; let s = 0; for (let j = 0; j < P.n; j++) if ((mask >> j) & 1) s += P.c[j]; if (s > best) best = s; } return best; };
+          const cases = [];
+          for (let k = 5; k <= 9; k++) cases.push(build(k, Array.from({ length: k }, (_, i) => [i, (i + 1) % k]), new Array(k).fill(1)));
+          for (let t = 0; t < 14; t++) {
+            const h = 4 + Math.floor(rand() * 3), e = [];
+            for (let a = 0; a < h; a++) for (let b = a + 1; b < h; b++) if (rand() < 0.45) e.push([a, b]);
+            if (!e.length) e.push([0, 1]);
+            const w = Array.from({ length: h }, () => 1 + Math.round(rand() * 5));
+            cases.push(build(2 * h, e.concat(e.map(([a, b]) => [a + h, b + h])), w.concat(w)));
+          }
+          cases.forEach((P, t) => {
+            const isInt = new Uint8Array(P.n).fill(1);
+            gens += E.autRows(P, isInt).gens;
+            const want = brute(P);
+            const on = E.solveMIP(P, isInt, { gap: 0 });
+            const off = E.solveMIP(P, isInt, { gap: 0, symmetry: false });
+            if (on.status !== 'optimal' || !close(on.obj, want, 1e-9) || !close(off.obj, want, 1e-9)) bad.push(`#${t} ${on.obj}/${off.obj} want ${want}`);
+          });
+          const asym = build(5, [[0, 1], [1, 2], [2, 3], [3, 4], [1, 3]], [1, 1, 1, 1, 2]);
+          const ra = E.autRows(asym, new Uint8Array(5).fill(1));
+          const s = ra.rows[0];
+          if (s && !((s.idx[0] === 0 && s.idx[1] === 4) || (s.idx[0] === 4 && s.idx[1] === 0))) bad.push('invalid permutation on near-asymmetric graph');
+          return (!bad.length && gens >= 10) || (bad.join('; ') || `generators ${gens}`);
+        }
+      },
+      {
         name: 'v5 · Sparse 6,000×6,000 LP with Forrest–Tomlin updates', run() {
           const rand = E.mulberry32(23);
           const m = 6000, n = 6000;
