@@ -60,13 +60,35 @@ NadirEngine.define('wasm', function (E) {
     0x0c, 0, 0x0b, 0x0b
   ]);
 
+  const usolve = fn([[2, I32], [1, F64], [1, I32]], [
+    ...get(5), ...c32(1), SUB, ...set(9),
+    0x02, 0x40, 0x03, 0x40,
+    ...get(9), ...c32(0), LT, 0x0d, 1,
+    ...get(3), ...get(9), ...c32(3), SHL, ADD, ...F_LOAD, ...set(8),
+    ...get(0), ...get(9), ...c32(2), SHL, ADD, ...tee(7), ...I_LOAD(0), ...set(6),
+    ...get(7), ...I_LOAD(4), ...set(7),
+    0x02, 0x40, 0x03, 0x40,
+    ...get(6), ...get(7), GE, 0x0d, 1,
+    ...get(8),
+    ...get(2), ...get(6), ...c32(3), SHL, ADD, ...F_LOAD,
+    ...get(3), ...get(1), ...get(6), ...c32(2), SHL, ADD, ...I_LOAD(0), ...c32(3), SHL, ADD, ...F_LOAD,
+    FMUL, 0xa1, ...set(8),
+    ...step(6, 1),
+    0x0c, 0, 0x0b, 0x0b,
+    ...get(3), ...get(9), ...c32(3), SHL, ADD,
+    ...get(8), ...get(4), ...get(9), ...c32(3), SHL, ADD, ...F_LOAD, 0xa3,
+    ...F_STORE,
+    ...get(9), ...c32(1), SUB, ...set(9),
+    0x0c, 0, 0x0b, 0x0b
+  ]);
+
   const bytes = new Uint8Array([
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
     ...sec(1, vec([[0x60, 4, I32, I32, I32, F64, 0], [0x60, 3, I32, I32, I32, 1, F64], [0x60, 6, I32, I32, I32, I32, I32, I32, 0]])),
     ...sec(2, vec([[...str('e'), ...str('m'), 0x02, 0x00, 0x01]])),
-    ...sec(3, vec([[0], [1], [2]])),
-    ...sec(7, vec([[...str('a'), 0x00, 0], [...str('d'), 0x00, 1], [...str('t'), 0x00, 2]])),
-    ...sec(10, vec([daxpy, ddot, spmv]))
+    ...sec(3, vec([[0], [1], [2], [2]])),
+    ...sec(7, vec([[...str('a'), 0x00, 0], [...str('d'), 0x00, 1], [...str('t'), 0x00, 2], [...str('u'), 0x00, 3]])),
+    ...sec(10, vec([daxpy, ddot, spmv, usolve]))
   ]);
 
   let mod = null;
@@ -78,7 +100,20 @@ NadirEngine.define('wasm', function (E) {
     const pages = Math.max(1, Math.ceil(byteLen / 65536));
     const mem = new WebAssembly.Memory({ initial: pages });
     const ex = new WebAssembly.Instance(mod, { e: { m: mem } }).exports;
-    return { mem, axpy: ex.a, dot: ex.d, spmv: ex.t };
+    return { mem, axpy: ex.a, dot: ex.d, spmv: ex.t, usolve: ex.u };
+  }
+
+  function upper(m, rowStart, colIdx, vals, diag) {
+    const nnz = rowStart[m];
+    const oS = 0, oI = (m + 1) * 4, oV = Math.ceil((oI + nnz * 4) / 8) * 8, oX = oV + nnz * 8, oD = oX + m * 8;
+    const k = instance(oD + m * 8);
+    const buf = k.mem.buffer;
+    new Int32Array(buf, oS, m + 1).set(rowStart);
+    new Int32Array(buf, oI, nnz).set(colIdx);
+    new Float64Array(buf, oV, nnz).set(vals);
+    new Float64Array(buf, oD, m).set(diag);
+    const X = new Float64Array(buf, oX, m);
+    return { solve(rhs) { X.set(rhs); k.usolve(oS, oI, oV, oX, oD, m); return X; } };
   }
 
   function dense(m) {
@@ -99,6 +134,6 @@ NadirEngine.define('wasm', function (E) {
     return { price(y) { Y.set(y); k.spmv(oCs, oCi, oCv, oY, oOut, n); return OUT; } };
   }
 
-  E.wasm = mod ? { dense, pricer, simd: true } : null;
+  E.wasm = mod ? { dense, pricer, upper, simd: true } : null;
   E.wasmEnabled = () => !!E.wasm && !E.wasmOff;
 });

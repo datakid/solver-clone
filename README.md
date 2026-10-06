@@ -4,6 +4,22 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## v5.5 — work stealing, WASM sparse solves, orbitopes (stable release)
+- **Work-stealing parallel B&B** (`worker-host.js` `solveSteal`, used automatically by **Solve** for hard MIPs).
+  - A task queue feeds up to 4 workers.
+  - Each task is a *split path*: a list of `[parts, part]` levels, replayed deterministically by `mip.js` (`o.split`).
+  - A task that runs out of its time slice is split into k child tasks and put back on the queue, so idle workers steal the unfinished subtree.
+  - Every finished task passes its best value to the next as a `cutoff`. Outside cutoffs only apply after the deterministic split, so sibling replays stay identical, and sibling signatures are cross-checked.
+  - **SharedArrayBuffer incumbent**: when the page is cross-origin isolated, all workers read and write one shared `Float64Array` best value, so pruning is instant. Open `index.html?isolate` and the service worker adds the COOP/COEP headers (it takes effect on the second load).
+  - Results say *Optimal* only when every leaf finished and all signatures matched. Otherwise they say *Good*.
+  - Verified in the app: a run forced into 112 steals across 3 workers reached the true optimum, and the pool shut down cleanly.
+- **WASM sparse triangular solve** (`wasm.js` `u` + `lu.js`). On sparse factors with m ≥ 800, the U back-substitution runs as a CSR WebAssembly kernel over a pivot-ordered copy, until the first Forrest–Tomlin update (then it uses the JavaScript column solve). The factor reports `sparse-simd`. *Not a true supernodal LU yet*: this basis kernel is the foundation, and supernode detection is listed under next steps.
+- **Orbitopes** (`mip.js` `orbitopeRows`). Assignment-like structures are detected: set-partitioning or packing rows (Σx ≤ 1 over binaries) crossed with identical "resource" column groups that have the same costs and coefficient profile. Nadir adds packing-orbitope ordering rows, so each column may only start a job once the previous column has, which removes the machine-permutation symmetry. Columns covered by orbitopes are excluded from the simpler orbit rows.
+- **Settings** → Integer models: *Break symmetry*, *Learn from dead ends*, *Parallel search*. All three persist and are passed through to the engine.
+- **Meta line** shows `N steals · shared bound` and `N orbitopes` when they apply.
+- **Fix**: an outside cutoff could be undercut by a root or heuristic solution in `offer`. It is now guarded, and a test covers it.
+- Tests: **52 engine cases**. New: orbitope detection plus the optimum unchanged on 12 assignment MIPs; a 2×2 nested split matching plain B&B; cutoff soundness; the WASM CSR U-solve residual; a 900×900 `sparse-simd` FTRAN residual.
+
 ## v5.4 — conflict learning, symmetry, parallel tree search, WASM SIMD
 - **Conflict analysis** (`mip.js`). When a node fails (propagation, a conflict-graph clash, or an infeasible LP), Nadir minimises its branching path. It deletes decisions one at a time, keeping a deletion when the rest still fails: first by cheap propagation, then by a capped LP check (at most 400 probes). What remains becomes a *no-good* cut (Σ over the 0-decisions x + Σ over the 1-decisions (1−x) ≥ 1). No-goods are stored separately and checked at every node. This only applies to binary paths of 2–24 decisions, with at most 3,000 no-goods. Counters: `learned` and `learnedPrunes`.
 - **Symmetry handling (orbital reduction).** Integer columns with identical cost, bounds and row pattern form an orbit. Nadir adds the ordering x₁ ≥ x₂ ≥ … inside each orbit, which keeps one representative of every symmetric solution, so the optimum is unchanged. It runs before presolve and can be switched off (`symmetry: false`).
@@ -227,13 +243,13 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 
 ## Known limits
 - The LP is single-threaded JavaScript. Around 10⁴ rows takes seconds; 10⁵+ rows would need presolve for LPs, hypersparse FTRAN/BTRAN and LU fill reduction (planned next).
-- MIP restarts happen only at the root. Symmetry handling covers identical columns only, not general permutation groups. The parallel tree split is static, with no work stealing.
+- MIP restarts happen only at the root. Symmetry handling covers identical columns and packing orbitopes, not arbitrary permutation groups. Without cross-origin isolation, workers share the best value only between tasks, not instantly.
 - WASM SIMD speeds up the dense kernels a lot. Sparse models are still bound by the JavaScript sparse triangular solves, so the 3k×3k LP runs at about the same speed.
 - MIP sensitivity is *conditional*: it is valid with the whole-number decisions held at their best values. NLP results have no ranging.
 - Exact switches need finite ranges on everything inside the `abs`/`max`/`min` (at most 400 switches). Otherwise those models use the search engines.
 - Apple doesn't let a web page trigger Add to Home Screen on iOS, so Nadir can only guide you through it. An installed iOS app also keeps its own storage, separate from Safari tabs; export a library file to move models across.
 
 ## Recommended next steps
-- Work stealing between B&B workers, using a SharedArrayBuffer incumbent when the page is cross-origin isolated.
-- A WASM sparse triangular solve with a supernodal LU.
-- Detection of general symmetry groups (orbitopes for assignment-like models).
+- Supernode detection in the sparse LU, so it can use dense SIMD blocks.
+- Keep the WASM U-solve after Forrest–Tomlin updates (patch the CSR in place).
+- Graph-automorphism symmetry detection (a nauty-style refinement) beyond orbitopes.

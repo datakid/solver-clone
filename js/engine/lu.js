@@ -268,12 +268,43 @@ NadirEngine.define('lu', function (E) {
     };
     const removeIn = (arrI, arrV, c) => { for (let t = 0; t < arrI.length; t++) if (arrI[t] === c) { arrI[t] = arrI[arrI.length - 1]; arrI.pop(); if (arrV) { arrV[t] = arrV[arrV.length - 1]; arrV.pop(); } return true; } return false; };
 
+    let WU = null, wuPerm = null;
+    if (m >= 800 && E.wasmEnabled && E.wasmEnabled()) {
+      try {
+        const rs = new Int32Array(m + 1), ci2 = new Int32Array(uNnz), cv2 = new Float64Array(uNnz), dg = new Float64Array(m);
+        wuPerm = new Int32Array(m);
+        const posOfCol = new Int32Array(m);
+        for (let q = 0; q < m; q++) posOfCol[seq[q]] = q;
+        let p = 0;
+        for (let q = 0; q < m; q++) {
+          const c = seq[q];
+          wuPerm[q] = c;
+          dg[q] = D[c];
+          const I = UrI[c], V = UrV[c];
+          for (let t = 0; t < I.length; t++) { ci2[p] = posOfCol[I[t]]; cv2[p] = V[t]; p++; }
+          rs[q + 1] = p;
+        }
+        WU = E.wasm.upper(m, rs, ci2, cv2, dg);
+      } catch (e) { WU = null; }
+    }
+    const stats = { wasmU: 0 };
+
     function ftran(b) {
       const w = Float64Array.from(b);
       for (let k = 0; k < m; k++) {
         const br = w[pivRow[k]];
         if (br === 0) continue;
         for (let t = LsA[k]; t < LsA[k + 1]; t++) w[LrA[t]] -= LvA[t] * br;
+      }
+      if (WU && !etaR.length && seq.length === m) {
+        spike = Float64Array.from(w);
+        const rhs = new Float64Array(m);
+        for (let q = 0; q < m; q++) rhs[q] = w[rowOf[wuPerm[q]]];
+        const X = WU.solve(rhs);
+        const x = new Float64Array(m);
+        for (let q = 0; q < m; q++) x[wuPerm[q]] = X[q];
+        stats.wasmU++;
+        return x;
       }
       for (let e = 0; e < etaR.length; e++) {
         const I = etaI[e], V = etaV[e];
@@ -378,7 +409,7 @@ NadirEngine.define('lu', function (E) {
 
     const grown = () => uNnz + etaNnz + LrA.length + m > 3 * nnz0 + 4 * m || seq.length > 3 * m;
 
-    return { ok: true, ftran, btran, update, grown, kind: 'sparse', fill: LrA.length + uNnz - (nnzIn - m), get nnz() { return LrA.length + uNnz + etaNnz + m; } };
+    return { ok: true, ftran, btran, update, grown, kind: WU ? 'sparse-simd' : 'sparse', stats, fill: LrA.length + uNnz - (nnzIn - m), get nnz() { return LrA.length + uNnz + etaNnz + m; } };
   }
 
   function factor(m, cols, opt) {

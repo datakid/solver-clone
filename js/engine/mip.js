@@ -410,13 +410,67 @@ NadirEngine.define('mip', function (E) {
     return cuts.slice(0, maxCuts);
   }
 
-  function orbitRows(P, isInt) {
+  function orbitopeRows(P, isInt) {
+    const n = P.n, used = new Set(), rows = [];
+    const isBin = (j) => isInt[j] && P.lower[j] === 0 && P.upper[j] === 1;
+    const jobRow = new Int32Array(n).fill(-1), jobs = [];
+    P.rows.forEach((r, i) => {
+      if (r.cut || r.op === '>=' || Math.abs(r.rhs - 1) > 1e-12 || r.idx.length < 2) return;
+      for (let k = 0; k < r.idx.length; k++) if (r.val[k] !== 1 || !isBin(r.idx[k]) || jobRow[r.idx[k]] >= 0) return;
+      const a = jobs.length;
+      jobs.push(i);
+      for (const j of r.idx) jobRow[j] = a;
+    });
+    if (jobs.length < 2) return { rows, used, groups: 0 };
+    const isJob = new Set(jobs);
+    const other = Array.from({ length: n }, () => []);
+    P.rows.forEach((r, i) => { if (!isJob.has(i)) for (const j of r.idx) other[j].push(i); });
+    const byKey = new Map();
+    for (let j = 0; j < n; j++) {
+      if (jobRow[j] < 0 || !other[j].length) continue;
+      const key = other[j].slice().sort((a, b) => a - b).join(',');
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(j);
+    }
+    const groups = new Map();
+    for (const [key, vars] of byKey) {
+      const set = new Set(vars), perJob = new Map();
+      let ok = true;
+      for (const j of vars) { if (perJob.has(jobRow[j])) { ok = false; break; } perJob.set(jobRow[j], j); }
+      if (!ok) continue;
+      const rowIds = key.split(',').map(Number);
+      for (const i of rowIds) { for (const j of P.rows[i].idx) if (!set.has(j)) { ok = false; break; } if (!ok) break; }
+      if (!ok) continue;
+      const jl = [...perJob.keys()].sort((a, b) => a - b);
+      const prof = rowIds.map((i) => { const r = P.rows[i]; const cf = new Map(); r.idx.forEach((j, t) => cf.set(jobRow[j], (cf.get(jobRow[j]) || 0) + r.val[t])); return r.op + r.rhs + ':' + jl.map((a) => cf.get(a) || 0).join(','); }).sort().join('|');
+      const sig = jl.join(',') + '#' + jl.map((a) => P.c[perJob.get(a)] || 0).join(',') + '#' + prof;
+      if (!groups.has(sig)) groups.set(sig, []);
+      groups.get(sig).push(jl.map((a) => perJob.get(a)));
+    }
+    let count = 0;
+    for (const cols of groups.values()) {
+      const p = cols.length, q = cols[0].length;
+      if (p < 2 || q > 80 || p * q > 3000) continue;
+      count++;
+      for (const c of cols) for (const j of c) used.add(j);
+      for (let k = 1; k < p; k++) {
+        for (let a = 0; a < q; a++) {
+          const idx = [cols[k][a]], val = [1];
+          for (let b = 0; b < a; b++) { idx.push(cols[k - 1][b]); val.push(-1); }
+          rows.push({ idx, val, op: '<=', rhs: 0, sym: true });
+        }
+      }
+    }
+    return { rows, used, groups: count };
+  }
+
+  function orbitRows(P, isInt, skip) {
     const n = P.n;
     const sig = Array.from({ length: n }, () => []);
     P.rows.forEach((r, i) => { for (let k = 0; k < r.idx.length; k++) if (r.val[k]) sig[r.idx[k]].push(i + ':' + r.val[k]); });
     const groups = new Map();
     for (let j = 0; j < n; j++) {
-      if (!isInt[j] || P.lower[j] === P.upper[j]) continue;
+      if (!isInt[j] || P.lower[j] === P.upper[j] || (skip && skip.has(j))) continue;
       const key = (P.c[j] || 0) + '|' + P.lower[j] + '|' + P.upper[j] + '|' + sig[j].sort().join(',');
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(j);
@@ -469,8 +523,10 @@ NadirEngine.define('mip', function (E) {
 
     const n = P.n;
     if (o.symmetry !== false) {
-      const sym = orbitRows(P, isInt);
-      if (sym.rows.length) { P = Object.assign({}, P, { rows: P.rows.concat(sym.rows) }); stats.orbits = sym.orbits; stats.orbitVars = sym.vars; }
+      const ot = orbitopeRows(P, isInt);
+      const sym = orbitRows(P, isInt, ot.used);
+      const extra = ot.rows.concat(sym.rows);
+      if (extra.length) { P = Object.assign({}, P, { rows: P.rows.concat(extra) }); stats.orbits = sym.orbits; stats.orbitVars = sym.vars; stats.orbitopes = ot.groups; stats.orbitopeRows = ot.rows.length; }
     }
     let nodes = 0, pivots = 0;
     let inc = null, incVal = Infinity;
@@ -482,18 +538,25 @@ NadirEngine.define('mip', function (E) {
       }
       return isIntVal(P.c0 || 0);
     })();
+    let extOn = !((Array.isArray(o.split) && o.split.length) || (o.parts | 0) > 1);
+    const cutoffV = Number.isFinite(o.cutoff) ? o.cutoff * dir : Infinity;
+    const shared = o.shared ? new Float64Array(o.shared) : null;
     const pruneAt = () => {
-      if (!inc) return Infinity;
-      const tol = Math.max(1e-9, gap * Math.max(1, Math.abs(incVal)));
-      return integerObj ? incVal - Math.max(tol, 1 - 1e-6) : incVal - tol;
+      let ref = inc ? incVal : Infinity;
+      if (extOn) { if (cutoffV < ref) ref = cutoffV; if (shared && shared[0] < ref) ref = shared[0]; }
+      if (ref === Infinity) return Infinity;
+      const tol = Math.max(1e-9, gap * Math.max(1, Math.abs(ref)));
+      return integerObj ? ref - Math.max(tol, 1 - 1e-6) : ref - tol;
     };
     const offer = (cand) => {
       if (!cand) return false;
       const v = cand.obj * dir;
+      if (extOn) { const ext = Math.min(cutoffV, shared ? shared[0] : Infinity); if (v >= ext - 1e-9 * Math.max(1, Math.abs(ext))) return false; }
       if (!inc || v < incVal - 1e-9 * Math.max(1, Math.abs(incVal))) {
         const x = Float64Array.from(cand.x);
         for (let j = 0; j < n; j++) if (isInt[j]) x[j] = Math.round(x[j]);
         inc = { x, obj: cand.obj }; incVal = v;
+        if (shared && v < shared[0]) shared[0] = v;
         if (onEvent) onEvent({ incumbent: cand.obj, nodes, ms: Date.now() - t0 });
         return true;
       }
@@ -712,16 +775,26 @@ NadirEngine.define('mip', function (E) {
     nodes = 1;
     const parts = Math.max(1, o.parts | 0), part = Math.max(0, Math.min(parts - 1, o.part | 0));
     if (fractional(root.x) >= 0 && root.obj * dir < pruneAt()) {
-      if (parts > 1) {
+      const split = Array.isArray(o.split) && o.split.length ? o.split : parts > 1 ? [[parts, part]] : [];
+      if (split.length) {
         sink = [];
         branch(rootNode, root);
-        let guard = 0, halted = null;
-        while (sink.length && sink.length < parts * 4 && guard++ < 400) { const hlt = visit(sink.shift()); if (hlt) { halted = hlt; break; } }
-        const open = sink;
+        let halted = null, open = sink;
+        const sigs = [];
+        for (let L = 0; L < split.length && !halted; L++) {
+          const pp = split[L][0], pi = split[L][1];
+          sink = open;
+          let guard = 0;
+          while (sink.length && sink.length < pp * 4 && guard++ < 400) { const hlt = visit(sink.shift()); if (hlt) { halted = hlt; break; } }
+          open = sink;
+          sigs.push(open.length + ':' + nodes + ':' + (inc ? +incVal.toPrecision(12) : 'none'));
+          open = open.filter((_, i) => i % pp === pi);
+        }
         sink = null;
-        stats.split = { parts, part, open: open.length, shared: nodes, sig: open.length + ':' + nodes + ':' + (inc ? +incVal.toPrecision(12) : 'none') };
+        extOn = true;
+        stats.split = { parts: split[0][0], part: split[0][1], levels: split.length, open: open.length, sig: sigs[0], sigs };
         if (halted === 'unbounded') unbounded = true; else if (halted === 'stop') stopped = true;
-        open.forEach((nd, i) => { if (i % parts === part) add(nd); });
+        open.forEach((nd) => add(nd));
       } else branch(rootNode, root);
     }
 
@@ -756,6 +829,7 @@ NadirEngine.define('mip', function (E) {
   E.cliqueCuts = cliqueCuts;
   E.conflictGraph = conflictGraph;
   E.orbitRows = orbitRows;
+  E.orbitopeRows = orbitopeRows;
   E.conflictPropagate = conflictPropagate;
   E.solveMIP = mip;
 });

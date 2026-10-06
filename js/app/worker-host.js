@@ -157,12 +157,93 @@
     return out;
   }
 
+  function stealTree(model, settings, onProgress, k, opts) {
+    const O = opts || {};
+    if (current) stop();
+    stopPool();
+    const t0 = performance.now();
+    const budget = Math.max(0.2, +settings.timeLimit || 10);
+    const sab = typeof SharedArrayBuffer === 'function' && self.crossOriginIsolated ? new SharedArrayBuffer(8) : null;
+    if (sab) new Float64Array(sab)[0] = Infinity;
+    const isMin = model.goal && model.goal.sense === 'min';
+    const better = (a, b) => (b == null || (isMin ? a < b - 1e-9 : a > b + 1e-9));
+    return new Promise((resolve, reject) => {
+      const queue = [], busy = new Set(), leaves = [];
+      let best = null, steals = 0, pending = 0, done = false, idle = 0;
+      const P = { workers: [], reject };
+      pool = P;
+      const sigBad = { v: false }, groupSig = new Map(), spent = { nodes: 0, pivots: 0 };
+      let groupSeq = 0;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        P.workers.forEach((w) => w.terminate());
+        if (pool === P) pool = null;
+        const ok = leaves.filter((r) => r.status === 'optimal' || r.status === 'feasible');
+        const proven = !sigBad.v && leaves.every((r) => r.status === 'optimal' || r.status === 'infeasible');
+        const nodes = spent.nodes, pivots = spent.pivots;
+        let out = best ? Object.assign({}, best) : Object.assign({}, leaves.find((r) => r.status === 'unbounded') || leaves.find((r) => r.status === 'stopped') || leaves[0] || { status: 'stopped' });
+        if (best) { out.status = proven ? 'optimal' : 'feasible'; if (proven) out.gap = 0; }
+        else if (!proven && out.status === 'infeasible') out.status = 'stopped';
+        out.nodes = nodes; out.pivots = pivots; out.ms = performance.now() - t0;
+        out.parallel = { workers: k, consistent: !sigBad.v, steals, tasks: leaves.length, shared: !!sab };
+        if (out.mip) out.mip = Object.assign({}, out.mip, { learned: leaves.reduce((s, r) => s + ((r.mip && r.mip.learned) || 0), 0), dualPivots: leaves.reduce((s, r) => s + ((r.mip && r.mip.dualPivots) || 0), 0), primalPivots: leaves.reduce((s, r) => s + ((r.mip && r.mip.primalPivots) || 0), 0) });
+        resolve(out);
+      };
+      const pump = () => {
+        if (done) return;
+        while (queue.length && idle) { idle--; start(queue.shift()); }
+        if (!queue.length && !pending) finish();
+      };
+      const start = (task) => {
+        const w = P.workers.find((x) => !busy.has(x));
+        busy.add(w);
+        pending++;
+        const runId = ++runSeq;
+        task.t = performance.now();
+        const left = budget - (performance.now() - t0) / 1000;
+        const slice = task.split.length ? Math.max(0.15, Math.min(left, Math.max(0.6, budget / 6))) : Math.max(0.15, left);
+        w.onmessage = (ev) => {
+          const m = ev.data;
+          if (done || m.runId !== runId) return;
+          if (m.type === 'progress') { if (!task.split.length && onProgress) onProgress(m); return; }
+          busy.delete(w); pending--; idle++;
+          if (m.type === 'error') { P.reject = () => {}; done = true; P.workers.forEach((x) => x.terminate()); if (pool === P) pool = null; reject(new Error(m.message)); return; }
+          const r = m.result;
+          if (task.group != null) {
+            const sg = r.mip && r.mip.split && r.mip.split.sigs ? r.mip.split.sigs.join('/') : 'none';
+            if (!groupSig.has(task.group)) groupSig.set(task.group, sg); else if (groupSig.get(task.group) !== sg) sigBad.v = true;
+          }
+          if ((r.status === 'optimal' || r.status === 'feasible') && better(r.objective, best && best.objective)) best = r;
+          spent.nodes += r.nodes || 0; spent.pivots += r.pivots || 0;
+          const timeLeft = budget - (performance.now() - t0) / 1000;
+          const unfinished = r.status === 'stopped' || (r.status === 'feasible' && (r.gap > 0 || r.gap == null));
+          if (unfinished && timeLeft > 0.3 && task.split.length < 6 && r.engine === 'bb') {
+            steals++;
+            const kk = Math.max(2, Math.min(k, 4)), g = ++groupSeq;
+            for (let p = 0; p < kk; p++) queue.push({ split: task.split.concat([[kk, p]]), group: g });
+          } else leaves.push(r);
+          pump();
+        };
+        w.onerror = (e) => { e.preventDefault && e.preventDefault(); if (done) return; P.reject = () => {}; done = true; P.workers.forEach((x) => x.terminate()); if (pool === P) pool = null; reject(new Error(e.message || 'Worker failed')); };
+        const s = Object.assign({}, settings, { timeLimit: slice, split: task.split, parallel: false });
+        if (best) s.cutoff = best.objective;
+        if (sab) s.shared = sab;
+        w.postMessage({ type: 'solve', runId, model, settings: s });
+      };
+      for (let i = 0; i < k; i++) { try { P.workers.push(new Worker(makeUrl())); idle++; } catch (e) { break; } }
+      if (!P.workers.length) { pool = null; run({ type: 'solve', model, settings }, { onProgress }).then(resolve, reject); return; }
+      queue.push({ split: [] });
+      pump();
+    });
+  }
+
   async function smartSolve(model, settings, onProgress) {
     const first = await run({ type: 'solve', model, settings }, { onProgress });
     const k = Math.min(poolSize(), 4);
     const hard = first && first.engine === 'bb' && (first.status === 'feasible' || first.status === 'stopped' || first.ms > 1500);
     if (!hard || fallback || k < 2 || settings.parallel === false) return first;
-    const par = await parallelTree(model, settings, onProgress, k);
+    const par = await stealTree(model, settings, onProgress, k);
     const better = par.objective != null && (first.objective == null || (first.sense === 'min' ? par.objective < first.objective - 1e-9 : par.objective > first.objective + 1e-9));
     if (par.status === 'optimal' && first.status !== 'optimal') return Object.assign(par, { ms: first.ms + par.ms });
     if (better) return Object.assign(par, { ms: first.ms + par.ms });
@@ -185,6 +266,7 @@
     solve(model, settings, onProgress) { return run({ type: 'solve', model, settings }, { onProgress }); },
     solveSmart: smartSolve,
     solveTree: parallelTree,
+    solveSteal: stealTree,
     sweep: parallelSweep,
     stop,
     get poolSize() { return poolSize(); },

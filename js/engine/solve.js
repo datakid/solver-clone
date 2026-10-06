@@ -399,7 +399,7 @@ NadirEngine.define('solve', function (E) {
         R.push(r.iterations, r.obj, 0, true);
       } else {
         const isInt = LP.integerHint;
-        r = E.branchAndBound(LP, isInt, { deadline, nodeLimit: settings.nodeLimit, gap: settings.gap, maxIter: settings.maxIter, presolve: settings.presolve, cuts: settings.cuts, symmetry: settings.symmetry, conflicts: settings.conflicts, parts: settings.parts, part: settings.part, classic: settings.lpMethod === 'dense' }, (ev) => {
+        r = E.branchAndBound(LP, isInt, { deadline, nodeLimit: settings.nodeLimit, gap: settings.gap, maxIter: settings.maxIter, presolve: settings.presolve, cuts: settings.cuts, symmetry: settings.symmetry, conflicts: settings.conflicts, parts: settings.parts, part: settings.part, split: settings.split, cutoff: settings.cutoff, shared: settings.shared, classic: settings.lpMethod === 'dense' }, (ev) => {
           if (ev.incumbent !== undefined) R.push(ev.nodes, ev.incumbent, 0, true);
           else if (post) R.push(ev.nodes, R.history.length ? R.history[R.history.length - 1] : NaN, NaN, false);
         });

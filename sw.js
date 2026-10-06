@@ -1,4 +1,4 @@
-const VERSION = 'nadir-v5.4.0';
+const VERSION = 'nadir-v5.5.0';
 const CORE = [
   './',
   'index.html',
@@ -84,14 +84,22 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (req.mode === 'navigate') {
+    const isolate = url.searchParams.has('isolate');
+    const wrap = (res) => {
+      if (!isolate || !res || res.status === 0) return res;
+      const h = new Headers(res.headers);
+      h.set('Cross-Origin-Opener-Policy', 'same-origin');
+      h.set('Cross-Origin-Embedder-Policy', 'require-corp');
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+    };
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req);
         if (fresh.ok) { const c = await caches.open(VERSION); c.put('index.html', fresh.clone()); }
-        return fresh;
+        return wrap(fresh);
       } catch (e) {
         const c = await caches.open(VERSION);
-        return (await c.match('index.html')) || (await c.match('./')) || Response.error();
+        return wrap((await c.match('index.html')) || (await c.match('./'))) || Response.error();
       }
     })());
     return;

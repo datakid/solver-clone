@@ -241,7 +241,9 @@
       if (r.lpPresolve && (r.lpPresolve.rows || r.lpPresolve.cols)) bits.push(`presolve −${fmt(r.lpPresolve.rows)} rows −${fmt(r.lpPresolve.cols)} cols`);
       if (r.engine === 'bb' && r.mip && r.mip.strong) bits.push(`${fmt(r.mip.strong)} strong probes`);
       if (r.parallel && !r.parallel.noGain) bits.push(`${r.parallel.workers} workers`);
-      if (r.lu === 'dense-simd' || r.simd) bits.push('SIMD');
+      if (/simd/.test(r.lu || '') || r.simd) bits.push('SIMD');
+      if (r.parallel && r.parallel.steals) bits.push(`${fmt(r.parallel.steals)} ${r.parallel.steals === 1 ? 'steal' : 'steals'}${r.parallel.shared ? ' · shared bound' : ''}`);
+      if (r.engine === 'bb' && r.mip && r.mip.orbitopes) bits.push(`${fmt(r.mip.orbitopes)} ${r.mip.orbitopes === 1 ? 'orbitope' : 'orbitopes'}`);
       if (r.engine === 'bb' && r.mip && r.mip.orbits) bits.push(`${fmt(r.mip.orbits)} ${r.mip.orbits === 1 ? 'orbit' : 'orbits'}`);
       if (r.engine === 'bb' && r.mip && r.mip.learned) bits.push(`${fmt(r.mip.learned)} learned`);
       if (r.engine === 'bb' && r.mip && r.mip.restarts) bits.push(`${r.mip.restarts === 1 ? 'restart' : fmt(r.mip.restarts) + ' restarts'}`);

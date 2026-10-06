@@ -377,7 +377,7 @@ NadirEngine.define('revised', function (E) {
       let nbLog = 0, bStruct = 0;
       for (let i = 0; i < m; i++) if (stat[n + i] !== BASIC) nbLog++;
       for (let i = 0; i < m; i++) if (head[i] < n) bStruct++;
-      const work = nbLog * (m * 4 + (B.kind === 'dense' ? m * m : Q.nnz * 3)) + bStruct * (Q.nnz + N + m * 4);
+      const work = nbLog * (m * 4 + (/^dense/.test(B.kind) ? m * m : Q.nnz * 3)) + bStruct * (Q.nnz + N + m * 4);
       if (work > budget) return { skipped: true, reason: 'Model too large for full sensitivity ranging' };
       const primalRange = (w) => {
         let up2 = Infinity, dn = Infinity;

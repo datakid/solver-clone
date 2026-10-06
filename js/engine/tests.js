@@ -214,7 +214,7 @@ NadirEngine.define('tests', function (E) {
           let dualObj = 0;
           for (let i = 0; i < m; i++) dualObj += r.duals[i] * rows[i].rhs;
           const gapRel = Math.abs(dualObj - r.obj) / Math.max(1, Math.abs(r.obj));
-          return (r.lu === 'sparse' && viol < 1e-6 && gapRel < 1e-6 && ms < 15000) || `lu ${r.lu}, viol ${viol}, duality gap ${gapRel}, ${ms}ms`;
+          return (/^sparse/.test(r.lu) && viol < 1e-6 && gapRel < 1e-6 && ms < 15000) || `lu ${r.lu}, viol ${viol}, duality gap ${gapRel}, ${ms}ms`;
         }
       },
       {
@@ -710,6 +710,54 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
+        name: 'v5.5 · Orbitopes on assignment models, WASM sparse U solve, nested split + cutoff', run() {
+          const bad = [];
+          const rand = E.mulberry32(808);
+          let groups = 0;
+          for (let t = 0; t < 12 && bad.length < 3; t++) {
+            const jobs = 4 + Math.floor(rand() * 3), mach = 3, n = jobs * mach;
+            const w = Array.from({ length: jobs }, () => 2 + Math.round(rand() * 6));
+            const cap = Math.round(w.reduce((s, x) => s + x, 0) / mach) + 1;
+            const rows = [];
+            for (let j = 0; j < jobs; j++) rows.push({ idx: Array.from({ length: mach }, (_, k) => j * mach + k), val: new Array(mach).fill(1), op: '<=', rhs: 1 });
+            for (let k = 0; k < mach; k++) rows.push({ idx: w.map((_, j) => j * mach + k), val: w, op: '<=', rhs: cap });
+            const c = Float64Array.from({ length: n }, (_, i) => w[Math.floor(i / mach)] + 1);
+            const P = { n, c, c0: 0, rows, lower: new Float64Array(n), upper: new Float64Array(n).fill(1), maximize: true };
+            const isInt = new Uint8Array(n).fill(1);
+            const ot = E.orbitopeRows(P, isInt);
+            groups += ot.groups;
+            const a = E.solveMIP(P, isInt, { gap: 0, symmetry: false, conflicts: false, cuts: false, restart: false });
+            const b = E.solveMIP(P, isInt, { gap: 0 });
+            if (a.status !== b.status || !close(a.obj, b.obj, 1e-6)) bad.push(`#${t} orbitope ${a.obj} vs ${b.obj}`);
+            const leaves = [];
+            for (const p of [0, 1]) for (const q of [0, 1]) leaves.push(E.solveMIP(P, isInt, { gap: 0, split: [[2, p], [2, q]], cuts: false }));
+            const bestLeaf = Math.max(...leaves.filter((r) => r.x).map((r) => r.obj));
+            if (!close(bestLeaf, a.obj, 1e-6)) bad.push(`#${t} nested split ${bestLeaf} vs ${a.obj}`);
+            const cut = E.solveMIP(P, isInt, { gap: 0, cutoff: a.obj + 0.5, cuts: false });
+            if (cut.status !== 'infeasible' && !(cut.obj >= a.obj + 0.5 - 1e-9)) bad.push(`#${t} cutoff ignored ${cut.status} ${cut.obj}`);
+          }
+          if (!groups) bad.push('no orbitope detected');
+          if (E.wasm && E.wasm.upper) {
+            const m = 5, rs = Int32Array.of(0, 2, 3, 4, 4, 4), ci = Int32Array.of(1, 3, 2, 4), cv = Float64Array.of(0.5, -1, 2, 0.25), dg = Float64Array.of(2, 1, 4, 3, 5);
+            const U = E.wasm.upper(m, rs, ci, cv, dg);
+            const b = Float64Array.of(1, 2, 3, 4, 5);
+            const x = Float64Array.from(U.solve(b));
+            const ux = new Float64Array(m);
+            for (let i = 0; i < m; i++) { ux[i] = dg[i] * x[i]; for (let p = rs[i]; p < rs[i + 1]; p++) ux[i] += cv[p] * x[ci[p]]; }
+            if (ux.some((v, i) => Math.abs(v - b[i]) > 1e-12)) bad.push('wasm U solve residual');
+            const R = E.mulberry32(9), M = 900, cols = [];
+            for (let k = 0; k < M; k++) { const idx = [k], val = [3 + R()]; for (let t = 0; t < 3; t++) { const i = Math.floor(R() * M); if (i !== k) { idx.push(i); val.push(R() - 0.5); } } cols.push({ idx, val }); }
+            const f = E.luFactor(M, cols, { force: 'sparse' });
+            const bb = Float64Array.from({ length: M }, () => R()), xx = f.ftran(bb), Bx = new Float64Array(M);
+            cols.forEach((c, k) => c.idx.forEach((i, t) => { Bx[i] += c.val[t] * xx[k]; }));
+            let res = 0;
+            for (let i = 0; i < M; i++) res = Math.max(res, Math.abs(Bx[i] - bb[i]));
+            if (f.kind !== 'sparse-simd' || res > 1e-9 || !f.stats.wasmU) bad.push(`sparse-simd ftran ${f.kind} ${res}`);
+          }
+          return !bad.length || bad.join('; ') + ` (orbitope groups ${groups})`;
+        }
+      },
+      {
         name: 'v5 · Sparse 6,000×6,000 LP with Forrest–Tomlin updates', run() {
           const rand = E.mulberry32(23);
           const m = 6000, n = 6000;
@@ -730,7 +778,7 @@ NadirEngine.define('tests', function (E) {
           let dualObj = 0;
           for (let i = 0; i < m; i++) dualObj += r.duals[i] * rows[i].rhs;
           const gapRel = Math.abs(dualObj - r.obj) / Math.max(1, Math.abs(r.obj));
-          return (r.lu === 'sparse' && viol < 1e-6 && gapRel < 1e-6 && ms < 30000) || `viol ${viol}, gap ${gapRel}, ${ms}ms`;
+          return (/^sparse/.test(r.lu) && viol < 1e-6 && gapRel < 1e-6 && ms < 30000) || `viol ${viol}, gap ${gapRel}, ${ms}ms`;
         }
       },
       {
