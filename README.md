@@ -4,6 +4,39 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## v5.1 — installing on Safari
+- **Add-to-Home-Screen guide** (`js/app/pwa.js`, `css/install.css`). iOS Safari has no install prompt, so *Install* now opens a sheet written for the browser you're on:
+  - **iPhone Safari**: Share → Add to Home Screen → Add, with an animated arrow pointing at the Share button in the bottom toolbar.
+  - **iPad Safari**: the same steps, with the arrow at the top right.
+  - **Chrome / Edge on iOS 16.4+**: Share in the address bar.
+  - **Firefox on iOS and in-app browsers** (Instagram, Facebook, LinkedIn…): *Open in Safari*, with a Copy link button.
+  - **macOS Safari 17+**: File → Add to Dock.
+  - **Older Safari**: a pointer to Sonoma or to Chrome/Edge.
+  - **Desktop Firefox**: explains that it can't install, and offers the single-file download.
+  - **Chromium**: the native prompt, as before.
+- The install button and palette entry adapt their label (*Add to Home Screen* / *Add to Dock* / *Install Nadir*). On iOS and macOS Safari, a gentle reminder appears on the 3rd visit and then every 4 visits, at most twice.
+- **A real web manifest** (`manifest.webmanifest`). It was referenced before but missing, so Chrome couldn't offer install and iOS fell back to defaults. It now has `id`, `scope`, standalone display with window-controls overlay, theme colours, three shortcuts, and both *any* and *maskable* icons.
+- **Proper icons.** `images/icon-1024.png` (full-bleed square, so iOS rounds it cleanly) and `images/icon-maskable-1024.png` (logo inside the safe zone). These replace the 150 px JPEGs; the old one had black corners that showed on the Home Screen.
+- **Standalone polish.** The header, results sheet, solve button, toasts and drawer all respect the notch and home-indicator safe areas. The status bar is translucent and there's no rubber-band overscroll or tap flash. Inputs are at least 16 px so iOS doesn't zoom in. There are light and dark `theme-color` tags. Nadir asks for persistent storage once installed, so iOS is less likely to clear saved models.
+- `?install` opens the guide. `?install=ios|ipad|ios-chrome|ios-inapp|mac` previews each variant on any device.
+
+## What's new in v5 — the four known limits, tackled
+
+### Solver
+- **Forrest–Tomlin LU updates** (`js/engine/lu.js`). The sparse factorization was rewritten: array-based rows with column count buckets (a Markowitz search over the few sparsest columns, no hash maps), then an in-place Forrest–Tomlin update of U on every basis change instead of piling up product-form etas. Accuracy is checked on each update (the new pivot must match `w[r]·d_old`), and the basis is refactorized automatically if that check fails. Refactor interval scales with model size. Result: the 3,000×3,000 sparse LP dropped from ~5–8 s to **~1.5–2.9 s**, and a 6,000×6,000 LP solves in ~7–8.5 s (new test).
+- **Dual simplex** (`js/engine/revised.js`). Any warm-started solve whose basis is still dual feasible (B&B children after a bound change, LPs after cuts are added) is re-optimised with a bounded dual simplex (largest-infeasibility row choice, bound-flip-aware ratio test, safeguarded by refactorization). The primal method only runs as a fallback. Results report `dual` pivots.
+- **Knapsack cover cuts** (`js/engine/mip.js`). At the root, every row with binaries is turned into a knapsack (complementing negative coefficients, moving continuous parts to their best bound). Nadir finds a violated minimal cover, extends it, and adds it next to the Gomory cuts. **Pseudo-cost branching** takes over from most-fractional branching once a few branches have been seen.
+- **Sensitivity for integer models**. After Branch & Bound, Nadir re-solves the LP with the whole-number decisions held at their best values. That gives shadow prices, reduced costs and RHS/cost ranging for the continuous part. Integer decisions show as *held at N*. The "Biggest lever" sentence says the integers are held fixed.
+- **Ranging on rewritten models**. Ranging is no longer hidden for models using `abs` / `max` / `min` / `pos`. Ranges come straight from the rewritten LP.
+- **Exact switches for wrong-way corners (big-M)** (`js/engine/reform.js`). Non-convex uses such as `maximize abs(x)`, `abs(x - 5) >= 2`, `minimize min(a, b)`, `maximize max(a, b)` or maximin distances get one binary switch per corner. Each switch has a big-M tightened from the variable bounds, and the helper variables carry exact bounds. Branch & Bound then proves the very best answer. If a range is unbounded, Nadir falls back to the search engines as before. You can turn this off in Settings → Smart modelling → *Exact switches for wrong-way corners*. CPLEX export writes `switch_k` columns into the `Binary` section.
+- New template **Keep away from hazards** (a maximin depot placement, solved as a MIP with 4 switches).
+
+### Smoothness
+- New `css/motion.css` + `js/app/motion.js`. Drawer, dialogs, popovers and toasts now animate *out* as well as in, with emphasised easing. Deleted rows collapse smoothly, and reordered rows glide to their new place using FLIP (Web Animations). Buttons get a soft press ink and spring-back. Switches stretch while pressed. The first result reveal staggers the story lines and table rows, grows the range bars, and gives the hero number a rise and glow. Later re-solves just cross-fade, so nothing flickers. `<details>` sections open with a slide. All of this is disabled for reduced-motion users.
+
+### Tests
+Engine suite: **42 cases** (`engine-check.html`). New: big-M classification, big-M exactness vs brute force on 30 random non-convex MIPs, Forrest–Tomlin residuals over 300 swaps, dual-simplex re-optimisation vs the dense tableau, cover cuts plus MIP sensitivity, ranging on rewritten models, and a 6,000×6,000 sparse LP. All 13 templates solve Optimal.
+
 ## What's new in v4 — a smarter solver, a calmer UI
 
 ### Solver
@@ -33,7 +66,7 @@ Core loop: **type → live check → ⌘↵ → answer.**
 - **Better nonlinear integer solving**: after DE (and ALM polish), an integer local search (±1 moves and pairwise swaps, re-polishing the continuous part) finds the true best on small mixed-integer nonlinear models.
 - **Responsive at half-screen**: single column below 1100px. The welcome panel sits inline at the top (it is no longer hidden in a bottom sheet), toasts move to the top so they never cover results, and the header collapses its secondary actions.
 - **Visual polish** (`css/polish.css`): higher-contrast secondary text (WCAG AA), larger card titles, white input boxes that look editable, a gradient guided-setup hero, and tidier limit suggestions.
-- Your logo is used as the PWA / touch icon (`images/nadir-icon.png`).
+- Your logo is used as the PWA / touch icon (now `images/icon-1024.png`).
 - Tests: engine 27/27 (`engine-check.html`). New: infeasible fixes, unbounded culprit, MINLP true best, all 6 guide recipes solve, unknown-name quick fixes.
 
 ## What's new in v2
@@ -97,10 +130,11 @@ Product mix, Diet, Transportation, Assignment, Knapsack, Portfolio, Curve fit, B
 | `index.html?tour` | Starts the guided tour |
 | `index.html?wizard[=kind]` | Opens Guided setup (optionally straight into `produce`, `budget`, `pick`, `blend`, `assign`, `ship`) |
 | `index.html?guide[=functions\|results]` | Opens the Language guide |
-| `index.html?template=<key>` | Loads a template (`bakery`, `ad-budget`, `product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `staffing`, `robust-fit`, `break-even`) |
+| `index.html?template=<key>` | Loads a template (`bakery`, `ad-budget`, `product-mix`, `diet`, `transport`, `assignment`, `knapsack`, `portfolio`, `curve-fit`, `staffing`, `robust-fit`, `spread-out`, `break-even`) |
 | `&solve` | Solves right after loading |
 | `&text` | Opens Text view |
 | `&theme=dark\|light\|system` | Sets the theme |
+| `?install[=ios\|ipad\|ios-chrome\|ios-inapp\|mac]` | Opens the install guide (optionally previewing a platform) |
 | `index.html#m=…` / `#j=…` | Opens a shared model |
 | `engine-check.html` | Runs the engine tests alone, without the UI |
 | `sw.js`, `manifest.webmanifest` | Offline service worker and install manifest |
@@ -144,8 +178,13 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 - Tests: 25/25 (new: LU residuals, revised vs dense on 60 random LPs, 3,000×3,000 sparse LP with a strong-duality check, textbook ranging for max and min, MIP v2 vs classic on 40 random models).
 
 ## Known limits
-- The sparse LU uses Markowitz pivoting on a hash-map active submatrix. It is fine up to roughly 10⁴ rows. It is not a Forrest–Tomlin/HiGHS-class kernel, so very large (10⁵+) LPs are still slow in a browser.
-- Cuts are Gomory mixed-integer only (no knapsack cover or flow cover cuts). There is no dual simplex for re-optimising B&B nodes; child nodes are warm-started with the primal method.
-- Ranging applies to continuous LPs (Simplex engine). It is not available for MIP or NLP results, or for models rewritten from abs/max/min (shadow prices still are).
-- Corner straightening covers convex uses only. Non-convex ones (for example `maximize abs(x)`) would need binary big-M variables, which aren't generated automatically yet.
-- Install buttons depend on the browser: iOS needs Share → Add to Home Screen.
+- The LP is single-threaded JavaScript. Around 10⁴ rows takes seconds; 10⁵+ rows would need presolve for LPs, hypersparse FTRAN/BTRAN and LU fill reduction (planned next).
+- MIP has cover and Gomory cuts, but no flow-cover or clique cuts, and there are no restarts.
+- MIP sensitivity is *conditional*: it is valid with the whole-number decisions held at their best values. NLP results have no ranging.
+- Exact switches need finite ranges on everything inside the `abs`/`max`/`min` (at most 400 switches). Otherwise those models use the search engines.
+- Apple doesn't let a web page trigger Add to Home Screen on iOS, so Nadir can only guide you through it. An installed iOS app also keeps its own storage, separate from Safari tabs; export a library file to move models across.
+
+## Recommended next steps
+- Presolve for continuous LPs (doubleton/dominated columns) and hypersparse triangular solves.
+- Flow cover / clique cuts, plus reliability branching with strong-branching initialisation.
+- Show the dual-simplex/pivot breakdown in the results meta line.

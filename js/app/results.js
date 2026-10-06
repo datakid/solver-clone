@@ -232,6 +232,7 @@
       if (r.ms != null) bits.push(r.ms < 1 ? '<1 ms' : r.ms < 1000 ? `${Math.round(r.ms)} ms` : `${(r.ms / 1000).toFixed(r.ms < 10000 ? 2 : 1)} s`);
       if (r.engine === 'simplex' && r.pivots != null) bits.push(`${fmt(r.pivots)} ${r.pivots === 1 ? 'pivot' : 'pivots'}`);
       if (r.pwl && r.pwl.pieces) bits.push(`${fmt(r.pwl.pieces)} corner ${r.pwl.pieces === 1 ? 'piece' : 'pieces'} linearized`);
+      if (r.pwl && r.pwl.switches) bits.push(`${fmt(r.pwl.switches)} ${r.pwl.switches === 1 ? 'switch' : 'switches'}`);
       if (r.engine === 'bb' && r.nodes != null) bits.push(`${fmt(r.nodes)} nodes`);
       if (r.engine === 'alm' && r.starts) bits.push(`${r.starts} ${r.starts === 1 ? 'start' : 'starts'}`);
       if (r.engine === 'de' && r.generations) bits.push(`${fmt(r.generations)} generations`);
@@ -298,9 +299,14 @@
           P.push(`What holds you back: ${joinWords(nm)}${bind.length > 4 ? ` and ${fmt(bind.length - 4)} more` : ''} ${bind.length === 1 ? 'is' : 'are'} used up completely.`);
         } else if (!onlyEq) P.push('None of your limits is used up — the allowed ranges on your decisions set the answer.');
       }
-      if (r.engine === 'simplex' && r.constraints && sense !== 'target') {
+      if ((r.engine === 'simplex' || r.fixedDuals) && r.constraints && sense !== 'target') {
         let best = null;
         r.constraints.forEach((c) => { if (c.dual != null && Math.abs(c.dual) > 1e-9 && enabled.has(c.id) && (!best || Math.abs(c.dual) > Math.abs(best.dual))) best = c; });
+        if (best && r.fixedDuals) {
+          const nm = names.get(best.id) || best.label;
+          P.push(`Biggest lever: with the whole-number choices kept as they are, one more unit of room in <strong>${esc(nm)}</strong> would ${sense === 'min' ? 'cut' : 'add'} about <strong class="num">${esc(fmt(Math.abs(best.dual)))}</strong> ${sense === 'min' ? 'from' : 'to'} the goal.`);
+          best = null;
+        }
         if (best) {
           const nm = names.get(best.id) || best.label;
           const amt = esc(fmt(Math.abs(best.dual)));
@@ -315,7 +321,8 @@
       if (r.pwl && r.pwl.pieces) {
         const k = r.pwl.kinds || {};
         const what = joinWords([k.abs ? 'abs' : '', k.max ? 'max' : '', k.min ? 'min' : ''].filter(Boolean).map((x) => `<span class="mono">${x}()</span>`));
-        P.push(`<span class="faint">Your ${what || 'corner'} formulas were rewritten as straight lines, so ${r.engine === 'bb' ? 'Branch & Bound' : 'Simplex'} could prove this is the very best answer — not just a good one.</span>`);
+        const sw = r.pwl.switches ? ` Nadir added ${plural(r.pwl.switches, 'on/off switch', 'on/off switches')} for the corners that bend the wrong way.` : '';
+        P.push(`<span class="faint">Your ${what || 'corner'} formulas were rewritten as straight lines, so ${r.engine === 'bb' ? 'Branch & Bound' : 'Simplex'} could prove this is the very best answer — not just a good one.${sw}</span>`);
       }
       if (r.warmStart) P.push('<span class="faint">Started from the previous answer to get here faster.</span>');
       if (r.engine === 'alm') P.push(`<span class="faint">Nonlinear models can have more than one valley; Nadir compared ${plural(r.starts || 1, 'starting point')} and kept the best.</span>`);
@@ -325,9 +332,10 @@
         const pr = r.mip.presolve;
         if (pr && pr.rowsRemoved) bits.push(`presolve dropped ${plural(pr.rowsRemoved, 'redundant rule')}`);
         if (pr && pr.boundsTightened) bits.push(`tightened ${plural(pr.boundsTightened, 'bound')}`);
-        if (r.mip.cuts) bits.push(`added ${plural(r.mip.cuts, 'cutting plane')}`);
+        if (r.mip.cuts) bits.push(`added ${plural(r.mip.cuts, 'cutting plane')}${r.mip.covers ? ` (${fmt(r.mip.covers)} knapsack ${r.mip.covers === 1 ? 'cover' : 'covers'})` : ''}`);
         P.push(`<span class="faint">Before searching, Nadir ${joinWords(bits)}.</span>`);
       }
+      if (r.engine === 'bb' && r.mip && r.mip.dualPivots > 0 && r.nodes > 1) P.push(`<span class="faint">Each branch restarted from its parent with the dual simplex (${esc(fmt(Math.round(100 * r.mip.dualPivots / Math.max(1, r.mip.dualPivots + r.mip.primalPivots))))}% of pivots).</span>`);
       if (r.engine === 'bb' && r.status === 'feasible' && r.gap) P.push(`<span class="faint">Stopped within ${esc(fmt(r.gap * 100))}% of the best possible — close enough under the current settings.</span>`);
       const p = h('div', { class: 'story-text' });
       p.innerHTML = P.map((x) => `<p>${x}</p>`).join('');
@@ -368,8 +376,9 @@
           const atEdge = Math.abs(x - (Number.isFinite(lo) ? lo : hi)) < 1e-9;
           bar = `<span class="bound-bar is-open${atEdge ? ' is-edge' : ''}" data-tip="${Number.isFinite(lo) ? '≥ ' + esc(fmt(lo)) : '≤ ' + esc(fmt(hi))}"><i style="left:${Number.isFinite(lo) ? (atEdge ? 0 : 50) : (atEdge ? 100 : 50)}%"></i></span>`;
         }
-        const tr = h('tr', { class: 'is-link' + (Math.abs(x) < 1e-9 ? ' is-zero' : ''), dataset: { var: v.id, key: 'v' + j } });
-        tr.innerHTML = `<td class="nm">${valueLabel(v, i)}</td><td class="num keep">${esc(fmt(x))}</td><td class="num">${bar}</td>${hasRC ? `<td class="num">${esc(fmt(r.reducedCosts[j]))}</td>` : ''}`;
+        const tr = h('tr', { class: 'is-link' + (Math.abs(x) < 1e-9 ? ' is-zero' : ''), dataset: { var: v.id, key: 'v' + j }, style: count < 14 ? `--r:${count}` : null });
+        const rc = hasRC ? r.reducedCosts[j] : null;
+        tr.innerHTML = `<td class="nm">${valueLabel(v, i)}</td><td class="num keep">${esc(fmt(x))}</td><td class="num">${bar}</td>${hasRC ? `<td class="num">${rc == null ? '<span class="faint">whole</span>' : esc(fmt(rc))}</td>` : ''}`;
         act(tr, () => N.App.decide.focusRow(v.id));
         tb.append(tr);
         count++;
@@ -400,7 +409,7 @@
       let list = r.constraints;
       if (list.length > LIMIT && !showAllRows) list = list.filter((c) => c.binding || !c.ok).slice(0, LIMIT);
       for (const c of list) {
-        const tr = h('tr', { class: 'is-link', 'data-key': 'r' + c.row });
+        const tr = h('tr', { class: 'is-link', 'data-key': 'r' + c.row, style: list.indexOf(c) < 14 ? `--r:${list.indexOf(c) + 2}` : null });
         const opSym = c.op === '<=' ? '≤' : c.op === '>=' ? '≥' : '=';
         const badge = !c.ok ? '<span class="badge-off">broken</span>' : c.binding && c.op !== '=' ? '<span class="badge-binding" data-tip="Used up completely (technical: binding). Loosen it to improve the goal.">used up</span>' : '';
         tr.innerHTML = `<td class="nm" title="${esc(opSym)}">${esc(c.label)}</td><td class="num">${esc(fmt(c.lhs))}</td><td class="num">${esc(fmt(c.rhs))}</td><td class="num">${c.op === '=' ? '' : esc(fmt(c.slack))}</td><td>${badge}</td>${hasDual ? `<td class="num">${c.dual == null ? '' : esc(fmt(c.dual))}</td>` : ''}`;
@@ -511,6 +520,12 @@
             const cr = r.costRanges[j];
             const tr = h('tr', { class: 'is-link' + (Math.abs(r.values[j]) < 1e-9 ? ' is-zero' : '') });
             const w = r.objWeights ? r.objWeights[j] : null;
+            if (cr.fixed) {
+              tr.innerHTML = `<td class="nm">${valueLabel(v, i)}</td><td class="num">${w == null ? '' : esc(fmt(w))}</td><td class="num faint" data-tip="Whole-number decisions are held at their best value for this analysis">held at ${esc(fmt(r.values[j]))}</td>`;
+              act(tr, () => N.App.decide.focusRow(v.id));
+              tb.append(tr);
+              continue;
+            }
             tr.innerHTML = `<td class="nm">${valueLabel(v, i)}</td><td class="num">${w == null ? '' : esc(fmt(w))}</td><td class="num sens-range"><span>${w == null ? '−' + esc(rangeTxt(cr.dec)) : esc(fmt(cr.dec === Infinity ? -Infinity : w - cr.dec))}</span><i></i><span>${w == null ? '+' + esc(rangeTxt(cr.inc)) : esc(fmt(cr.inc === Infinity ? Infinity : w + cr.inc))}</span></td>`;
             act(tr, () => N.App.decide.focusRow(v.id));
             tb.append(tr);
@@ -519,7 +534,7 @@
         t.append(tb);
         sec.append(h('div', { class: 'table-wrap' }, t));
       }
-      sec.append(h('p', { class: 'field-hint' }, sense === 'max' || sense === 'min' ? 'Inside these ranges the same rules stay tight and the shadow prices hold. Outside them, re-solve.' : ''));
+      sec.append(h('p', { class: 'field-hint' }, sense === 'max' || sense === 'min' ? (r.rangingFixedInt ? 'Whole-number decisions are held at their best values; inside these ranges the continuous part of the plan and the shadow prices hold. Outside them, re-solve.' : 'Inside these ranges the same rules stay tight and the shadow prices hold. Outside them, re-solve.') : ''));
       return sec;
     }
 

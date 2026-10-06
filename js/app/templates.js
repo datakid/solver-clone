@@ -119,6 +119,16 @@
       }
     },
     {
+      key: 'spread-out', name: 'Keep away from hazards', kind: 'MIP · switches', icon: 'scale', blurb: 'Place a depot as far as possible from two hazards, inside a site.',
+      note: ['Place a depot on a 10 × 10 site so its distance to the nearer of two hazards is as large as possible, while staying within reach of the road.', 'Maximizing a min of abs() bends the wrong way for straight lines alone — Nadir adds on/off switches and Branch & Bound proves the best spot.'],
+      model: {
+        goal: { sense: 'max', expr: 'min(abs(x - hx[1]) + abs(y - hy[1]), abs(x - hx[2]) + abs(y - hy[2]))' },
+        variables: [V('x', { upper: '10' }), V('y', { upper: '10' })],
+        constraints: [R('Near the road', 'y <= roadReach'), R('Budget', 'x + y <= 16')],
+        parameters: [P('hx', '[2, 7]'), P('hy', '[3, 6]'), P('roadReach', '8', { min: 0, max: 10, step: 0.5 })]
+      }
+    },
+    {
       key: 'break-even', name: 'Break-even', kind: 'Target', icon: 'tag', blurb: 'The sales volume where profit is exactly zero.',
       note: ['Find the sales volume where profit is exactly zero.', 'Target mode solves goal = value instead of maximizing.'],
       model: {

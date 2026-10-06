@@ -1,0 +1,60 @@
+.install-dialog { max-width: 420px; }
+.install-sheet { display: flex; flex-direction: column; gap: 14px; }
+.install-head { display: flex; align-items: center; gap: 14px; }
+.install-icon { width: 64px; height: 64px; border-radius: 15px; box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--accent) 70%, transparent), 0 0 0 1px rgba(0,0,0,.05); animation: icon-drop 620ms var(--spring) both; }
+@keyframes icon-drop { from { opacity: 0; transform: translateY(-10px) scale(.8) rotate(-8deg); } }
+.install-titles { display: flex; flex-direction: column; gap: 2px; }
+.install-titles strong { font: 650 17px/1.2 var(--font-display); color: var(--text); letter-spacing: -.015em; }
+.install-titles span { font-size: 12.5px; color: var(--text-3); }
+.install-lead { font-size: 14px; color: var(--text-2); line-height: 1.5; }
+.install-steps { list-style: none; display: flex; flex-direction: column; gap: 8px; padding: 0; margin: 0; }
+.install-steps li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border); animation: fade-up 360ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 70ms + 120ms); }
+.install-ic { width: 36px; height: 36px; flex: none; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--surface); color: #0A84FF; box-shadow: inset 0 0 0 1px var(--border); }
+.ios-glyph { width: 22px; height: 22px; }
+.ios-add-pill { font: 650 12.5px/1 -apple-system, system-ui, sans-serif; color: #0A84FF; }
+.ios-n { font: 700 13px/1 var(--font-display); color: var(--accent-strong); }
+.install-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.install-txt strong { font-size: 13.5px; font-weight: 650; color: var(--text); }
+.install-txt span { font-size: 12.5px; color: var(--text-2); line-height: 1.4; }
+.install-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.install-arrow { position: fixed; z-index: 75; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: #0A84FF; box-shadow: 0 10px 24px -6px rgba(10,132,255,.6); pointer-events: none; }
+.install-arrow svg { width: 24px; height: 24px; }
+.install-arrow.is-bottom { left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); margin-left: -22px; animation: arrow-in 400ms var(--spring) both 300ms, arrow-bob-down 1.4s var(--ease) infinite 700ms; }
+.install-arrow.is-top { top: calc(10px + env(safe-area-inset-top)); right: 64px; animation: arrow-in 400ms var(--spring) both 300ms, arrow-bob-up 1.4s var(--ease) infinite 700ms; }
+.install-arrow.is-top svg { transform: rotate(180deg); }
+.install-arrow.is-leaving { animation: fade-out 160ms var(--ease-exit) both; }
+@keyframes arrow-in { from { opacity: 0; transform: scale(.5); } }
+@keyframes arrow-bob-down { 50% { transform: translateY(6px); } }
+@keyframes arrow-bob-up { 50% { transform: translateY(-6px); } }
+.points-bottom.dialog { margin-bottom: 80px; }
+
+.is-standalone body { overscroll-behavior-y: none; }
+.is-standalone * { -webkit-tap-highlight-color: transparent; }
+.is-standalone .app-header { padding-top: env(safe-area-inset-top); height: calc(60px + env(safe-area-inset-top)); }
+.is-standalone .app-header-inner { padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); }
+.is-standalone .app-main { padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); }
+.is-standalone .results-col { top: calc(84px + env(safe-area-inset-top)); }
+.is-standalone .toasts { top: auto; bottom: calc(24px + env(safe-area-inset-bottom)); }
+.is-standalone .drawer { top: calc(8px + env(safe-area-inset-top)); bottom: calc(8px + env(safe-area-inset-bottom)); }
+.is-ios-app .app-header { background: color-mix(in srgb, var(--bg) 88%, transparent); }
+.is-ios-app input, .is-ios-app textarea, .is-ios-app select { font-size: max(16px, 1em); }
+
+@media (max-width: 1100px) {
+  .is-standalone .app-main { padding-bottom: calc(130px + env(safe-area-inset-bottom)); }
+  .is-standalone .results-col > .card { padding-bottom: env(safe-area-inset-bottom); }
+  .is-standalone .solve-dock { bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .is-standalone .results-col.is-empty ~ .solve-dock, .is-standalone body.sheet-closed .solve-dock { bottom: calc(20px + env(safe-area-inset-bottom)); }
+  .is-standalone .toasts { bottom: calc(150px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 720px) {
+  .is-standalone .app-header { height: calc(56px + env(safe-area-inset-top)); }
+  .is-standalone .app-header-inner { padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+  .is-standalone .app-main { padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+  .is-standalone .drawer { top: 0; bottom: 0; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .install-dialog { max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-arrow { animation: none !important; }
+}
+@media print { .install-arrow { display: none !important; } }

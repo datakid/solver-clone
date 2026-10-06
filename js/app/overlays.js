@@ -54,9 +54,13 @@
     const layer = { close: () => close(null) };
     let resolveFn;
     const done = new Promise((r) => { resolveFn = r; });
+    let shut = false;
     function close(value) {
+      if (shut) return;
+      shut = true;
       popLayer(layer);
-      wrap.remove();
+      wrap.style.pointerEvents = 'none';
+      if (N.Motion) N.Motion.leave(wrap, 'is-leaving', 180); else wrap.remove();
       document.removeEventListener('keydown', onKey, true);
       if (prev && prev.focus && document.contains(prev)) prev.focus({ preventScroll: true });
       if (o.onClose) o.onClose(value);
@@ -147,7 +151,8 @@
       if (closed) return;
       closed = true;
       popLayer(layer);
-      el.remove();
+      el.style.pointerEvents = 'none';
+      if (N.Motion) N.Motion.leave(el, 'is-leaving', 120); else el.remove();
       document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey, true);
       if (o.onClose) o.onClose();

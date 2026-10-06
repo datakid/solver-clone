@@ -7,8 +7,18 @@
     return {
       rows,
       sync(items) {
+        const M = N.Motion;
         const keep = new Set(items.map((x) => x.id));
-        for (const [id, r] of rows) if (!keep.has(id)) { r.el.remove(); if (r.destroy) r.destroy(); rows.delete(id); }
+        const before = M && rows.size && rows.size < 120 ? M.snapshot(container) : null;
+        for (const [id, r] of rows) {
+          if (keep.has(id)) continue;
+          const el = r.el;
+          delete el.dataset.id;
+          if (M && before && el.isConnected) { el.classList.add('is-removing'); M.collapse(el, 200); }
+          else el.remove();
+          if (r.destroy) r.destroy();
+          rows.delete(id);
+        }
         let anchor = container.firstElementChild;
         items.forEach((item, i) => {
           let r = rows.get(item.id);
@@ -19,6 +29,7 @@
           else anchor = anchor.nextElementSibling;
           if (r.el === anchor) anchor = anchor.nextElementSibling;
         });
+        if (before) M.flip(container, before);
       },
       get(id) { return rows.get(id); }
     };

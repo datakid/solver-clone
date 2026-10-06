@@ -46,7 +46,7 @@
     }
     if (r.costRanges) {
       const rows = [['Decision', 'Value', 'Reduced cost', 'Cost allowable increase', 'Cost allowable decrease']];
-      r.layout.forEach((v) => { for (let i = 0; i < v.size; i++) { const j = v.offset + i; rows.push([E.elementName(v, i), r.values[j], r.reducedCosts ? r.reducedCosts[j] : '', rangeCell(r.costRanges[j].inc), rangeCell(r.costRanges[j].dec)]); } });
+      r.layout.forEach((v) => { for (let i = 0; i < v.size; i++) { const j = v.offset + i; const cr = r.costRanges[j]; rows.push([E.elementName(v, i), r.values[j], r.reducedCosts && r.reducedCosts[j] != null ? r.reducedCosts[j] : '', cr.fixed ? 'held (integer)' : rangeCell(cr.inc), cr.fixed ? '' : rangeCell(cr.dec)]); } });
       parts.push(rows);
     }
     const text = parts.map((b) => toTSV(b.map((row) => row.map((x) => (typeof x === 'number' ? fmt.plain(x) : x))))).join('\n\n');
@@ -64,7 +64,7 @@
       for (let i = 0; i < v.size; i++) {
         const j = v.offset + i;
         const cr = r.costRanges && r.costRanges[j];
-        rows.push(['decision', E.elementName(v, i), fmt.plain(r.values[j]), fmt.plain(r.bounds.lower[j]), fmt.plain(r.bounds.upper[j]), r.reducedCosts ? fmt.plain(r.reducedCosts[j]) : '', cr ? rangeCell(cr.inc) : '', cr ? rangeCell(cr.dec) : '']);
+        rows.push(['decision', E.elementName(v, i), fmt.plain(r.values[j]), fmt.plain(r.bounds.lower[j]), fmt.plain(r.bounds.upper[j]), r.reducedCosts && r.reducedCosts[j] != null ? fmt.plain(r.reducedCosts[j]) : '', cr && !cr.fixed ? rangeCell(cr.inc) : '', cr && !cr.fixed ? rangeCell(cr.dec) : '']);
       }
     });
     (r.constraints || []).forEach((c) => rows.push(['rule', c.label, fmt.plain(c.lhs), c.op, fmt.plain(c.rhs), c.dual == null ? '' : fmt.plain(c.dual), c.range ? rangeCell(c.range.inc) : '', c.range ? rangeCell(c.range.dec) : '']));
@@ -90,7 +90,7 @@
       }
       if (r.costRanges) {
         L.push('', '| Decision | Reduced cost | Cost +  | Cost − |', '|---|---:|---:|---:|');
-        r.layout.forEach((v) => { for (let i = 0; i < v.size; i++) { const j = v.offset + i; L.push(`| ${E.elementName(v, i)} | ${r.reducedCosts ? fmt(r.reducedCosts[j]) : ''} | ${fmt(r.costRanges[j].inc)} | ${fmt(r.costRanges[j].dec)} |`); } });
+        r.layout.forEach((v) => { for (let i = 0; i < v.size; i++) { const j = v.offset + i; const cr = r.costRanges[j]; L.push(`| ${E.elementName(v, i)} | ${r.reducedCosts && r.reducedCosts[j] != null ? fmt(r.reducedCosts[j]) : ''} | ${cr.fixed ? 'held' : fmt(cr.inc)} | ${cr.fixed ? '' : fmt(cr.dec)} |`); } });
       }
     }
     L.push('', `_Exported from Nadir · ${new Date().toLocaleString()}_`);

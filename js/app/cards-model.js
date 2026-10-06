@@ -136,7 +136,7 @@
       if (cls && cls.engine) {
         const kind = cls.pwl ? 'Straight lines with corners' : cls.linear ? 'Straight-line' : cls.nonsmooth ? 'Bumpy' : 'Curved';
         ehtml = icon(cls.linear ? 'layers' : cls.nonsmooth ? 'activity' : 'function', 'icon-xs') + esc(`${kind}${cls.hasInt ? ', whole numbers' : ''} · ${cls.label}`);
-        etip = cls.pwl ? `abs / max / min / pos are rewritten as ${cls.pieces} straight-line ${cls.pieces === 1 ? 'piece' : 'pieces'}, so Nadir can still prove the very best answer` : cls.linear ? 'Every formula is a weighted sum, so Nadir can prove the answer is the very best' : cls.nonsmooth ? 'Has jumps or kinks, so Nadir searches widely for a great answer' : 'Has curves, so Nadir tries several starting points and keeps the best';
+        etip = cls.pwl ? `abs / max / min / pos are rewritten as ${cls.pieces} straight-line ${cls.pieces === 1 ? 'piece' : 'pieces'}${cls.switches ? ` with ${cls.switches} on/off ${cls.switches === 1 ? 'switch' : 'switches'}` : ''}, so Nadir can still prove the very best answer` : cls.linear ? 'Every formula is a weighted sum, so Nadir can prove the answer is the very best' : cls.nonsmooth ? 'Has jumps or kinks, so Nadir searches widely for a great answer' : 'Has curves, so Nadir tries several starting points and keeps the best';
       }
       if (engine._h !== ehtml) { engine._h = ehtml; engine.innerHTML = ehtml; engine.classList.toggle('is-pwl', !!(cls && cls.pwl)); }
       if (etip) { if (engine.dataset.tip !== etip) engine.dataset.tip = etip; } else delete engine.dataset.tip;

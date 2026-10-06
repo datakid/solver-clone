@@ -354,13 +354,156 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
-        name: 'v4 · Non-convex uses keep the safe search engines', run() {
+        name: 'v5 · Non-convex corners get exact switches; unbounded ones keep the search engines', run() {
           const a = E.classify(E.compile(M({ sense: 'max', expr: 'abs(x - 3)' }, [V('x', { upper: '10' })], [])), {});
           const b = E.classify(E.compile(M({ sense: 'min', expr: 'x' }, [V('x', { upper: '10' })], [R('abs(x - 5) >= 2')])), {});
           const c = E.classify(E.compile(M({ sense: 'min', expr: 'x' }, [V('x', { upper: '10' })], [R('abs(x - 5) <= 2')])), {});
           const d = E.classify(E.compile(M({ sense: 'min', expr: 'abs(x - 2)' }, [V('x')], [])), { reform: false });
+          const e = E.classify(E.compile(M({ sense: 'max', expr: 'abs(x - 3)' }, [V('x')], [])), {});
+          const f = E.classify(E.compile(M({ sense: 'max', expr: 'abs(x - 3)' }, [V('x', { upper: '10' })], [])), { bigM: false });
           const r = E.solve(M({ sense: 'max', expr: 'abs(x - 3)' }, [V('x', { upper: '10' })], []), {});
-          return (!a.pwl && a.engine !== 'simplex' && !b.pwl && c.pwl && c.engine === 'simplex' && !d.pwl && ['optimal', 'feasible'].includes(r.status) && close(r.values[0], 10, 1e-3)) || JSON.stringify({ a, b, c, d, r: fmt(r) });
+          const s = E.solve(M({ sense: 'min', expr: 'x' }, [V('x', { upper: '10' })], [R('abs(x - 5) >= 2')]), {});
+          return (a.pwl && a.engine === 'bb' && a.switches === 1 && b.pwl && b.switches === 1 && c.pwl && c.engine === 'simplex' && !c.switches && !d.pwl && !e.pwl && !f.pwl
+            && r.status === 'optimal' && r.engine === 'bb' && close(r.values[0], 10) && close(r.objective, 7)
+            && s.status === 'optimal' && close(s.values[0], 0) && s.pwl.switches === 1) || JSON.stringify({ a, b, c, e, f, r: fmt(r), s: fmt(s) });
+        }
+      },
+      {
+        name: 'v5 · Big-M: maximize min / minimize max of two lines, either-or rule', run() {
+          const a = E.solve(M({ sense: 'min', expr: 'min(x, 8 - x)' }, [V('x', { upper: '6' })], []), {});
+          const b = E.solve(M({ sense: 'max', expr: 'max(2x - 3, 5 - x) ' }, [V('x', { upper: '4' })], [R('x >= 1')]), {});
+          const c = E.solve(M({ sense: 'max', expr: 'x + y' }, [V('x', { upper: '10' }), V('y', { upper: '10' })], [R('max(x - 3, y - 4) <= 0', 'Either'), R('x + y <= 15')]), {});
+          const cx = c.values ? Math.max(c.values[0] - 3, c.values[1] - 4) : NaN;
+          return (a.status === 'optimal' && a.engine === 'bb' && close(a.objective, 0) && b.status === 'optimal' && close(b.objective, 5) && close(b.values[0], 4)
+            && c.status === 'optimal' && close(c.objective, 7) && cx <= 1e-6) || fmt(a) + ' | ' + fmt(b) + ' | ' + fmt(c);
+        }
+      },
+      {
+        name: 'v5 · Big-M matches brute force on 30 random non-convex models', run() {
+          const rand = E.mulberry32(5);
+          const bad = [];
+          for (let t = 0; t < 30 && bad.length < 3; t++) {
+            const p = [1 + Math.round(rand() * 6), 1 + Math.round(rand() * 6)];
+            const w = [Math.round(rand() * 6 - 3) || 1, Math.round(rand() * 6 - 3) || 1];
+            const cap = 4 + Math.round(rand() * 8);
+            const m = M({ sense: 'max', expr: `abs(x - ${p[0]}) + abs(y - ${p[1]}) + ${w[0]}*x + ${w[1]}*y` }, [V('x', { type: 'int', upper: '8' }), V('y', { type: 'int', upper: '8' })], [R(`x + y <= ${cap}`)]);
+            const r = E.solve(m, {});
+            let best = -Infinity;
+            for (let x = 0; x <= 8; x++) for (let y = 0; y <= 8; y++) if (x + y <= cap) best = Math.max(best, Math.abs(x - p[0]) + Math.abs(y - p[1]) + w[0] * x + w[1] * y);
+            if (r.status !== 'optimal' || r.engine !== 'bb' || !close(r.objective, best)) bad.push(`#${t} ${fmt(r)} want ${best}`);
+          }
+          return !bad.length || bad.join('\n');
+        }
+      },
+      {
+        name: 'v5 · Forrest–Tomlin LU updates stay accurate over 300 column swaps', run() {
+          const rand = E.mulberry32(17);
+          const m = 500;
+          const pool = [];
+          for (let k = 0; k < m * 3; k++) {
+            const idx = [k % m], val = [3 + rand() * 3];
+            for (let t = 0; t < 3; t++) { const i = Math.floor(rand() * m); if (i !== k % m) { idx.push(i); val.push(rand() * 2 - 1); } }
+            pool.push({ idx, val });
+          }
+          const head = Int32Array.from({ length: m }, (_, i) => i);
+          const B = E.LUBasis(m, (j) => pool[j], { force: 'sparse', refactorEvery: 10000 });
+          B.factor(head);
+          let worst = 0, broken = 0;
+          const dense = (c) => { const a = new Float64Array(m); c.idx.forEach((i, t) => { a[i] += c.val[t]; }); return a; };
+          for (let it = 0; it < 300; it++) {
+            const q = m + Math.floor(rand() * 2 * m);
+            const w = B.ftran(dense(pool[q]));
+            let r = -1, bw = 0;
+            for (let i = 0; i < m; i++) if (Math.abs(w[i]) > bw) { bw = Math.abs(w[i]); r = i; }
+            B.update(r, w);
+            head[r] = q;
+            if (B.broken) { broken++; B.factor(head); }
+            if (it % 50 === 49) {
+              const b = Float64Array.from({ length: m }, () => rand() * 2 - 1);
+              const x = B.ftran(b), y = B.btran(b);
+              const Bx = new Float64Array(m);
+              let yr = 0;
+              for (let k = 0; k < m; k++) { const c = pool[head[k]]; let s = 0; c.idx.forEach((i, t) => { Bx[i] += c.val[t] * x[k]; s += c.val[t] * y[i]; }); yr = Math.max(yr, Math.abs(s - b[k])); }
+              for (let i = 0; i < m; i++) worst = Math.max(worst, Math.abs(Bx[i] - b[i]));
+              worst = Math.max(worst, yr);
+            }
+          }
+          return (worst < 1e-7 && broken < 5) || `residual ${worst.toExponential(2)}, rebuilt ${broken}`;
+        }
+      },
+      {
+        name: 'v5 · Dual simplex re-optimises after a bound change', run() {
+          const rand = E.mulberry32(8);
+          const bad = [];
+          let dual = 0;
+          for (let t = 0; t < 40 && bad.length < 3; t++) {
+            const n = 4 + Math.floor(rand() * 10), m = 2 + Math.floor(rand() * 8);
+            const rows = [];
+            for (let i = 0; i < m; i++) {
+              const idx = [], val = [];
+              for (let j = 0; j < n; j++) if (rand() < 0.7) { idx.push(j); val.push(1 + Math.round(rand() * 8)); }
+              rows.push({ idx, val, op: '<=', rhs: 10 + Math.round(rand() * 40) });
+            }
+            const P = { n, c: Float64Array.from({ length: n }, () => 1 + Math.round(rand() * 9)), c0: 0, rows, lower: new Float64Array(n), upper: new Float64Array(n).fill(Infinity), maximize: true };
+            const a = E.solveRevised(P, {});
+            if (a.status !== 'optimal') continue;
+            let j = 0;
+            for (let k = 0; k < n; k++) if (a.x[k] > a.x[j]) j = k;
+            const up = Float64Array.from(P.upper); up[j] = Math.floor(a.x[j] * 0.5);
+            const lo = Float64Array.from(P.lower);
+            const warm = E.solveRevised(P, { lower: lo, upper: up, basis: a.basis });
+            const cold = E.solveDense(P, { lower: lo, upper: up });
+            dual += warm.dual || 0;
+            if (warm.status !== cold.status || (cold.status === 'optimal' && !close(warm.obj, cold.obj, 1e-6))) bad.push(`#${t} ${warm.status} ${warm.obj} vs ${cold.status} ${cold.obj}`);
+          }
+          return (!bad.length && dual > 0) || (bad.join('; ') || 'dual simplex never ran');
+        }
+      },
+      {
+        name: 'v5 · Cover cuts on knapsacks, MIP sensitivity from the fixed-integer LP', run() {
+          const rand = E.mulberry32(41);
+          const n = 30;
+          const wts = Array.from({ length: n }, () => 10 + Math.round(rand() * 40));
+          const vals = wts.map((x) => x + Math.round(rand() * 10));
+          const P = { n, c: Float64Array.from(vals), c0: 0, rows: [{ idx: Array.from({ length: n }, (_, j) => j), val: wts, op: '<=', rhs: Math.round(wts.reduce((s, x) => s + x, 0) / 3) }], lower: new Float64Array(n), upper: new Float64Array(n).fill(1), maximize: true };
+          const isInt = new Uint8Array(n).fill(1);
+          const a = E.solveMIP(P, isInt, { gap: 0 });
+          const b = E.branchAndBoundClassic(P, isInt, { gap: 0, deadline: Date.now() + 20000 });
+          const m = M({ sense: 'max', expr: '5x + 4y + 3z' }, [V('x', { type: 'int' }), V('y', { type: 'int' }), V('z')], [R('6x + 4y + 2z <= 24', 'Wood'), R('x + 2y + z <= 6', 'Time')]);
+          const r = E.solve(m, {});
+          const hasDual = r.constraints && r.constraints.some((c) => c.dual != null);
+          const fixed = r.costRanges && r.costRanges[0].fixed && !r.costRanges[2].fixed;
+          return (a.status === 'optimal' && close(a.obj, b.obj) && a.stats.covers > 0 && r.status === 'optimal' && r.engine === 'bb' && hasDual && fixed && r.fixedDuals) || JSON.stringify({ a: [a.status, a.obj, a.stats], b: [b.status, b.obj], r: fmt(r, { cr: r.costRanges, fd: r.fixedDuals }) });
+        }
+      },
+      {
+        name: 'v5 · Ranging now works on models rewritten from abs / max', run() {
+          const r = E.solve(M({ sense: 'min', expr: 'sum(abs(x - pts)) + 0.5 * x' }, [V('x', { lower: '-inf' })], [R('x <= 20', 'Cap')], [P('pts', '[1, 2, 7, 9, 30]')]), {});
+          return (r.status === 'optimal' && r.engine === 'simplex' && r.costRanges && r.costRanges.length === 1 && !r.rangingNote && !!r.constraints[0].range) || fmt(r, { note: r.rangingNote, cr: r.costRanges });
+        }
+      },
+      {
+        name: 'v5 · Sparse 6,000×6,000 LP with Forrest–Tomlin updates', run() {
+          const rand = E.mulberry32(23);
+          const m = 6000, n = 6000;
+          const rows = [];
+          for (let i = 0; i < m; i++) {
+            const idx = [i], val = [2 + rand() * 3];
+            for (let t = 0; t < 3; t++) { const j = Math.floor(rand() * n); if (j !== i) { idx.push(j); val.push(0.2 + rand()); } }
+            rows.push({ idx, val, op: '<=', rhs: 50 + rand() * 50 });
+          }
+          const c = Float64Array.from({ length: n }, () => 1 + rand() * 9);
+          const P = { n, c, c0: 0, rows, lower: new Float64Array(n), upper: new Float64Array(n).fill(Infinity), maximize: true };
+          const t0 = Date.now();
+          const r = E.solveLP(P, { deadline: Date.now() + 60000, maxIter: 400000 });
+          const ms = Date.now() - t0;
+          if (r.status !== 'optimal') return `status ${r.status} after ${r.iterations} pivots, ${ms}ms`;
+          let viol = 0;
+          for (const row of rows) { let s = 0; row.idx.forEach((j, k) => { s += row.val[k] * r.x[j]; }); viol = Math.max(viol, s - row.rhs); }
+          let dualObj = 0;
+          for (let i = 0; i < m; i++) dualObj += r.duals[i] * rows[i].rhs;
+          const gapRel = Math.abs(dualObj - r.obj) / Math.max(1, Math.abs(r.obj));
+          return (r.lu === 'sparse' && viol < 1e-6 && gapRel < 1e-6 && ms < 30000) || `viol ${viol}, gap ${gapRel}, ${ms}ms`;
         }
       },
       {
@@ -394,9 +537,10 @@ NadirEngine.define('tests', function (E) {
     return JSON.stringify({ status: r.status, engine: r.engine, obj: r.objective, values: r.values && r.values.slice(0, 8), message: r.message, extra });
   }
 
-  function runAll() {
+  function runAll(filter) {
     const out = [];
     for (const c of cases()) {
+      if (filter && !filter(c.name)) continue;
       const t0 = Date.now();
       let ok, detail = '';
       try {

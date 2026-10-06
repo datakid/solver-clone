@@ -52,8 +52,10 @@
 
   function close() {
     if (!root) return;
-    root.remove();
+    const el = root;
     root = null;
+    el.style.pointerEvents = 'none';
+    if (N.Motion) N.Motion.leave(el, 'is-leaving', 220); else el.remove();
     O.popLayer(layer);
     if (prevFocus && document.contains(prevFocus)) prevFocus.focus({ preventScroll: true });
   }
@@ -331,12 +333,13 @@
         num('nodeLimit', 'Node limit', { step: '1000', min: '10' }),
         h('div', { class: 'full' }, sel('lpMethod', 'LP method', [['auto', 'Auto — revised simplex with LU (scales to large sparse models)'], ['revised', 'Revised simplex (sparse LU, bounded)'], ['dense', 'Dense tableau (classic v1 engine)']], 'Revised is used for everything unless you pick Dense. Dense falls back automatically on numerical trouble.')))),
       section('Smart modelling',
-        toggle('reform', 'Straighten corners', 'Rewrite abs, max, min, pos and clamp as straight-line pieces when it is safe, so Simplex or Branch & Bound can prove the very best answer instead of searching.')),
+        toggle('reform', 'Straighten corners', 'Rewrite abs, max, min, pos and clamp as straight-line pieces when it is safe, so Simplex or Branch & Bound can prove the very best answer instead of searching.'),
+        toggle('bigM', 'Exact switches for wrong-way corners', 'For uses like maximize abs(x) or abs(x) ≥ 2, add on/off switch variables (big-M) so Branch & Bound still proves the best answer. Needs finite ranges on the decisions involved.')),
       section('Integer models',
         toggle('presolve', 'Presolve', 'Drop redundant rules, turn one-variable rules into bounds, tighten bounds and big-M coefficients before searching.'),
-        toggle('cuts', 'Cutting planes', 'Add Gomory mixed-integer cuts at the root to close the gap faster.')),
+        toggle('cuts', 'Cutting planes', 'Add knapsack cover and Gomory mixed-integer cuts at the root to close the gap faster.')),
       section('Sensitivity',
-        toggle('ranging', 'Sensitivity ranging', 'Compute allowable increase/decrease for every rule limit and goal weight after linear solves.')),
+        toggle('ranging', 'Sensitivity ranging', 'Compute allowable increase/decrease for every rule limit and goal weight. Whole-number models are analysed with their whole-number choices held fixed.')),
       section('Behaviour',
         toggle('nonNegative', 'Unbounded decisions are non-negative', 'Like Excel Solver. Type -inf as a lower bound to allow negatives.'),
         toggle('liveResolve', 'Live re-solve', 'Re-solve as sliders and given values change, when the last solve took under 150 ms.'),
@@ -359,11 +362,11 @@
     const render = () => {
       const st = P ? P.state : {};
       const single = N.Build && N.Build.isSingle();
-      const status = single ? ['ok', 'Single-file build — this page already works offline'] : st.installed ? ['ok', 'Installed as an app'] : st.offlineReady ? ['ok', 'Ready to work offline'] : st.active ? ['info', 'Preparing offline copy…'] : ['muted', location.protocol === 'file:' ? 'Opened from a file — offline already' : 'Offline needs https or localhost'];
+      const status = single ? ['ok', 'Single-file build — this page already works offline'] : st.installed ? ['ok', st.platform && /^ios/.test(st.platform.kind) ? 'Running from your Home Screen' : 'Installed as an app'] : st.offlineReady ? ['ok', 'Ready to work offline'] : st.active ? ['info', 'Preparing offline copy…'] : ['muted', location.protocol === 'file:' ? 'Opened from a file — offline already' : 'Offline needs https or localhost'];
       box.replaceChildren(h('div', { class: 'pwa-status' }, h('span', { class: 'pill pill-' + status[0] }, status[1]), st.version ? h('span', { class: 'faint' }, st.version) : null));
       const row = h('div', { class: 'preset-row' });
       if (!single && !st.installed) {
-        const b = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('download', 'icon-sm') + 'Install Nadir' });
+        const b = h('button', { class: 'btn btn-soft btn-sm', type: 'button', html: icon('download', 'icon-sm') + (P.label ? P.label() : 'Install Nadir') });
         b.addEventListener('click', () => P.install());
         row.append(b);
       }

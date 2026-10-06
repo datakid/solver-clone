@@ -164,7 +164,7 @@
       if (patch.decimals !== undefined) N.util.fmt.setDecimals(S.settings.decimals);
       S.emit('settings', patch);
       if (!opts || !opts.quiet) {
-        if ('nonNegative' in patch || 'engine' in patch || 'reform' in patch) S.emit('model', { settings: true });
+        if ('nonNegative' in patch || 'engine' in patch || 'reform' in patch || 'bigM' in patch) S.emit('model', { settings: true });
       }
     },
     applyPreset(key) {
@@ -191,7 +191,7 @@
     },
     solverSettings() {
       const s = S.settings;
-      return { reform: s.reform !== false, lpMethod: s.lpMethod || 'auto', presolve: s.presolve !== false, cuts: s.cuts !== false, ranging: s.ranging !== false, engine: s.engine, tol: +s.tol, timeLimit: +s.timeLimit, multistart: +s.multistart, gap: +s.gap, patience: +s.patience, maxIter: +s.maxIter, nodeLimit: +s.nodeLimit, seed: +s.seed, nonNegative: s.nonNegative !== false };
+      return { reform: s.reform !== false, bigM: s.bigM !== false, lpMethod: s.lpMethod || 'auto', presolve: s.presolve !== false, cuts: s.cuts !== false, ranging: s.ranging !== false, engine: s.engine, tol: +s.tol, timeLimit: +s.timeLimit, multistart: +s.multistart, gap: +s.gap, patience: +s.patience, maxIter: +s.maxIter, nodeLimit: +s.nodeLimit, seed: +s.seed, nonNegative: s.nonNegative !== false };
     },
 
     saveUI(patch) {

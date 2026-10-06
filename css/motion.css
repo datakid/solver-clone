@@ -1,0 +1,117 @@
+:root {
+  --ease-emph: cubic-bezier(.2,0,0,1);
+  --ease-exit: cubic-bezier(.4,0,1,1);
+  --dur-fast: 120ms; --dur-med: 220ms; --dur-slow: 360ms;
+}
+
+html { scroll-behavior: smooth; }
+body:not(.is-ready) .app-main { opacity: 0; }
+body.is-ready .app-main { animation: app-in 420ms var(--ease-out) both; }
+@keyframes app-in { from { opacity: 0; } }
+
+.drawer { animation: drawer-in 380ms var(--ease-emph) both; will-change: transform; }
+@keyframes drawer-in { from { transform: translateX(calc(100% + 16px)); } to { transform: none; } }
+.is-leaving > .drawer { animation: drawer-out 220ms var(--ease-exit) both; }
+.is-leaving > .scrim { animation: fade-out 220ms var(--ease-exit) both; }
+@keyframes drawer-out { to { transform: translateX(calc(100% + 16px)); } }
+@keyframes fade-out { to { opacity: 0; } }
+
+.drawer-body > * { animation: tab-swap 260ms var(--ease-out) both; }
+@keyframes tab-swap { from { opacity: 0; transform: translateX(8px); } }
+.tabs button[aria-selected="true"]::after { animation: tab-in 260ms var(--ease-emph); transform-origin: center; }
+
+.dialog-wrap.is-leaving { animation: fade-out 180ms var(--ease-exit) both; }
+.dialog-wrap.is-leaving > .dialog { animation: dialog-out 180ms var(--ease-exit) both; }
+.dialog { animation: dialog-in 320ms var(--ease-emph) both; transform-origin: 50% 30%; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(14px) scale(.965); } }
+@keyframes dialog-out { to { opacity: 0; transform: translateY(6px) scale(.98); } }
+
+.pop { animation: pop-in 200ms var(--ease-emph) both; }
+.pop.is-leaving { animation: pop-out 120ms var(--ease-exit) both; }
+@keyframes pop-out { to { opacity: 0; transform: translateY(-3px) scale(.985); } }
+.menu-item { transition: background var(--dur-fast) var(--ease), padding-left var(--dur-med) var(--ease-out); }
+.menu-item:hover:not(:disabled) { padding-left: 13px; }
+
+.tooltip { transition: opacity 140ms var(--ease), transform 180ms var(--ease-out) !important; }
+
+.toast { animation: toast-in 420ms var(--spring) both; }
+.toast.is-out { animation: toast-out 200ms var(--ease-exit) both; transition: none; }
+@keyframes toast-out { to { opacity: 0; transform: translateY(8px) scale(.97); } }
+
+.row { animation: row-in 320ms var(--ease-emph) both; }
+@keyframes row-in { from { opacity: 0; transform: translateY(-6px) scale(.995); } }
+.row.is-removing { pointer-events: none; }
+.row.is-dragging { transform-origin: 50% 50%; scale: 1.01; transition: box-shadow 160ms var(--ease), scale 160ms var(--spring); cursor: grabbing; }
+.drop-line { animation: line-in 140ms var(--ease-out); transform-origin: left; }
+@keyframes line-in { from { transform: scaleX(.6); opacity: 0; } }
+
+.has-ink { overflow: hidden; isolation: isolate; }
+.ink { position: absolute; border-radius: 50%; pointer-events: none; background: currentColor; opacity: .14; transform: scale(0); animation: ink 520ms var(--ease-out) forwards; z-index: -1; }
+.solve-btn .ink, .btn-primary .ink { background: #fff; opacity: .22; }
+@keyframes ink { to { transform: scale(1); opacity: 0; } }
+.solve-btn.has-ink { overflow: visible; }
+
+.btn { transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), transform 260ms var(--spring); }
+.btn:active:not(:disabled) { transform: scale(.97); transition-duration: 80ms; }
+.segmented button { transition: background 200ms var(--ease-out), color 200ms var(--ease), box-shadow 200ms var(--ease), transform 200ms var(--spring); }
+.segmented button:active { transform: scale(.95); }
+.switch::after { transition: transform 300ms var(--spring), width 200ms var(--ease-out); }
+.switch:active::after { width: 19px; }
+.switch[aria-checked="true"]:active::after { transform: translateX(9px); }
+
+.solve-btn { transition: transform 260ms var(--spring), box-shadow 220ms var(--ease), filter var(--dur) var(--ease), background 300ms var(--ease), padding 300ms var(--ease-emph), color 300ms var(--ease); }
+.solve-btn > span { transition: opacity 200ms var(--ease); }
+.solve-ring .ring-fg { transition: stroke-dashoffset 220ms var(--ease-out); }
+.solve-btn.is-running .solve-best { animation: fade-in 200ms var(--ease); }
+
+.res > * { animation: res-swap 240ms var(--ease-out) both; }
+@keyframes res-swap { from { opacity: .001; transform: translateY(3px); } }
+.res.is-enter > * { animation: res-enter 460ms var(--ease-emph) both; }
+@keyframes res-enter { from { opacity: 0; transform: translateY(10px); } }
+.res.is-running > * { animation: none; }
+.res-hero { transition: border-color 300ms var(--ease), box-shadow 300ms var(--ease); }
+.res-hero.is-optimal { box-shadow: 0 0 0 0 transparent; }
+.res-hero.is-fresh.is-optimal { animation: hero-glow 1200ms var(--ease-out) 1; }
+@keyframes hero-glow { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--found) 0%, transparent); } 30% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--found) 22%, transparent); } 100% { box-shadow: 0 0 0 14px color-mix(in srgb, var(--found) 0%, transparent); } }
+.res-hero::after { transition: opacity 600ms var(--ease); }
+.res-hero.is-fresh::after { animation: hero-sun 1400ms var(--ease-out) both; }
+@keyframes hero-sun { from { opacity: 0; transform: translate(30px, -20px) scale(.7); } }
+.res-hero-value .num { display: inline-block; }
+.res-hero.is-fresh .res-hero-value .num { animation: num-rise 520ms var(--ease-emph) both; }
+@keyframes num-rise { from { opacity: .3; transform: translateY(6px); filter: blur(2px); } }
+.res-story .story-text > p { animation: fade-up 380ms var(--ease-out) both; }
+.res.is-enter .res-story .story-text > p:nth-child(2) { animation-delay: 120ms; }
+.res.is-enter .res-story .story-text > p:nth-child(3) { animation-delay: 180ms; }
+.res.is-enter .res-story .story-text > p:nth-child(4) { animation-delay: 240ms; }
+.res.is-enter .res-story .story-text > p:nth-child(n+5) { animation-delay: 300ms; }
+.res:not(.is-enter) .res-story .story-text > p { animation: none; }
+.res.is-enter .res-table tbody tr { animation: fade-up 320ms var(--ease-out) both; animation-delay: calc(min(var(--r, 0), 12) * 18ms + 160ms); }
+.bound-bar b { transition: width 520ms var(--ease-emph); }
+.bound-bar i { transition: left 520ms var(--ease-emph); }
+.res.is-enter .bound-bar b { animation: bar-grow 700ms var(--ease-emph) both 200ms; transform-origin: left; }
+@keyframes bar-grow { from { transform: scaleX(0); } }
+
+.res-details > *:not(summary) { animation: none; }
+.res-details[open] > *:not(summary) { animation: details-open 280ms var(--ease-emph) both; }
+@keyframes details-open { from { opacity: 0; transform: translateY(-4px); } }
+.summary-chev { transition: transform 300ms var(--ease-emph); }
+
+.results-col > .card { scroll-behavior: smooth; }
+.card { transition: border-color 220ms var(--ease), box-shadow 300ms var(--ease), transform 300ms var(--ease-out); }
+.model-col > .card { animation: card-in 560ms var(--ease-emph) both; }
+.model-col > .card:nth-child(2) { animation-delay: 50ms; }
+.model-col > .card:nth-child(3) { animation-delay: 100ms; }
+.model-col > .card:nth-child(4) { animation-delay: 150ms; }
+@keyframes card-in { from { opacity: 0; transform: translateY(12px); } }
+.step-badge { transition: background 320ms var(--ease), color 320ms var(--ease), box-shadow 320ms var(--ease), transform 420ms var(--spring); }
+
+.code-hl, .code-input { transition: border-color 160ms var(--ease), box-shadow 200ms var(--ease), background 200ms var(--ease); }
+.pill { transition: background 220ms var(--ease), color 220ms var(--ease), transform 260ms var(--spring); }
+
+.is-pwl { animation: fade-in 300ms var(--ease); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ink { display: none; }
+  body:not(.is-ready) .app-main { opacity: 1; }
+}

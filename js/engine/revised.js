@@ -144,8 +144,96 @@ NadirEngine.define('revised', function (E) {
     }
 
     refactor();
-    let iter = 0, degen = 0, bland = false, trouble = 0, verified = false, priceStart = 0;
+    let iter = 0, degen = 0, bland = false, trouble = 0, verified = false, priceStart = 0, dualIters = 0, dualRun = 'off';
     const cB = new Float64Array(m);
+
+    function dualPhase() {
+      const d = new Float64Array(N), alpha = new Float64Array(N), e = new Float64Array(m);
+      const prices = () => {
+        for (let i = 0; i < m; i++) cB[i] = cost[head[i]];
+        const y = B.btran(cB);
+        for (let j = 0; j < N; j++) d[j] = stat[j] === BASIC ? 0 : cost[j] - dot(y, j);
+      };
+      prices();
+      for (let j = 0; j < N; j++) {
+        const s = stat[j];
+        if (s === BASIC || lo[j] === up[j]) continue;
+        const dj = d[j];
+        if (s === LOW ? dj < -10 * DTOL : s === UPP ? dj > 10 * DTOL : Math.abs(dj) > 10 * DTOL) return 'skip';
+      }
+      let retried = false, best = Infinity, since = 0, bad = 0;
+      for (;;) {
+        if (iter >= maxIter) return 'limit';
+        if ((iter & 31) === 0 && Date.now() > deadline) return 'limit';
+        if (B.needsRefactor()) { refactor(); prices(); }
+        let r = -1, worst = 0, below = false, tot = 0;
+        for (let i = 0; i < m; i++) {
+          const h = head[i], v = x[h], l = lo[h], u = up[h];
+          let inf;
+          if (l > -Infinity && v < l - PTOL * (1 + Math.abs(l))) { inf = l - v; if (inf > worst) { worst = inf; r = i; below = true; } }
+          else if (u < Infinity && v > u + PTOL * (1 + Math.abs(u))) { inf = v - u; if (inf > worst) { worst = inf; r = i; below = false; } }
+          else continue;
+          tot += inf;
+        }
+        if (r < 0) return 'done';
+        if (tot < best * (1 - 1e-9)) { best = tot; since = 0; } else if (++since > 300) return 'skip';
+        e.fill(0); e[r] = 1;
+        const rho = B.btran(e);
+        const sg = below ? -1 : 1;
+        let bound = Infinity;
+        for (let j = 0; j < N; j++) {
+          const s = stat[j];
+          if (s === BASIC || lo[j] === up[j]) { alpha[j] = 0; continue; }
+          const a = dot(rho, j);
+          alpha[j] = a;
+          if (Math.abs(a) <= PIV) continue;
+          if (!(s === FREE || (s === LOW && sg * a > 0) || (s === UPP && sg * a < 0))) continue;
+          const rr = (Math.abs(d[j]) + DTOL) / Math.abs(a);
+          if (rr < bound) bound = rr;
+        }
+        if (bound === Infinity) {
+          if (!retried && B.updates > 0) { refactor(); prices(); retried = true; continue; }
+          return 'infeasible';
+        }
+        let q = -1, qa = 0;
+        for (let j = 0; j < N; j++) {
+          const a = alpha[j];
+          if (Math.abs(a) <= PIV) continue;
+          const s = stat[j];
+          if (s === BASIC || lo[j] === up[j]) continue;
+          if (!(s === FREE || (s === LOW && sg * a > 0) || (s === UPP && sg * a < 0))) continue;
+          if (Math.abs(d[j]) / Math.abs(a) <= bound && Math.abs(a) > Math.abs(qa)) { q = j; qa = a; }
+        }
+        const w = B.ftran(denseCol(q));
+        const wr = w[r];
+        if (Math.abs(wr) <= PIV || Math.abs(wr - qa) > 1e-6 * (1 + Math.abs(wr))) {
+          if (++bad > 4) return 'skip';
+          refactor(); prices();
+          continue;
+        }
+        retried = false;
+        const thetaD = d[q] / qa;
+        const h = head[r];
+        const target = below ? lo[h] : up[h];
+        const t = (x[h] - target) / wr;
+        if (t !== 0) for (let i = 0; i < m; i++) if (w[i] !== 0) x[head[i]] -= t * w[i];
+        x[q] += t;
+        x[h] = target;
+        stat[h] = lo[h] === up[h] ? LOW : below ? LOW : UPP;
+        pos[h] = -1;
+        head[r] = q; pos[q] = r; stat[q] = BASIC;
+        B.update(r, w);
+        if (thetaD !== 0) for (let j = 0; j < N; j++) if (alpha[j] !== 0) d[j] -= thetaD * alpha[j];
+        d[h] = -thetaD; d[q] = 0;
+        iter++; dualIters++;
+      }
+    }
+
+    if (warm && o.dual !== false) {
+      dualRun = dualPhase();
+      if (dualRun === 'infeasible') return { status: 'infeasible', iterations: iter, method: 'revised', lu: B.kind, repairs, warm, dual: dualIters };
+      if (dualRun === 'limit') return { status: 'limit', iterations: iter, method: 'revised', lu: B.kind, repairs, warm, dual: dualIters };
+    }
     const chunk = Math.max(1500, Math.ceil(N / 8));
     let status = null;
 
@@ -252,7 +340,7 @@ NadirEngine.define('revised', function (E) {
       else { degen = 0; bland = false; }
     }
 
-    const base = { status, iterations: iter, method: 'revised', lu: B.kind, repairs, warm };
+    const base = { status, iterations: iter, method: 'revised', lu: B.kind, repairs, warm, dual: dualIters, dualRun };
     if (status !== 'optimal') return base;
 
     for (let i = 0; i < m; i++) cB[i] = cost[head[i]];

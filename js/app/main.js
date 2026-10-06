@@ -10,8 +10,7 @@
     const t = S.settings.theme;
     const dark = t === 'dark' || (t === 'system' && media.matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = dark ? '#121614' : '#3F7D6E';
+    document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => { meta.content = dark ? '#121614' : '#3F7D6E'; });
     const b = document.getElementById('theme-btn');
     if (b) { b.innerHTML = icon(t === 'system' ? 'monitor' : dark ? 'moon' : 'sun'); b.dataset.tip = `Theme: ${t[0].toUpperCase() + t.slice(1)}`; }
   }
@@ -137,7 +136,7 @@
     act('Keyboard shortcuts', 'keyboard', shortcutSheet, { keys: '?' });
     act('Run test suite', 'flask', runTests);
     act('Download Nadir as one file', 'box', () => N.Build.download(), { keywords: 'single html offline build portable' });
-    act('Install Nadir as an app', 'download', () => N.PWA.install(), { keywords: 'pwa offline install home screen' });
+    act(N.PWA.label() === 'Install Nadir' ? 'Install Nadir as an app' : N.PWA.label(), 'download', () => N.PWA.install(), { keywords: 'pwa offline install home screen add to dock safari iphone ipad' });
     act('Check for update', 'restore', () => N.PWA.checkUpdate(), { keywords: 'version service worker' });
     act('Show sensitivity ranges', 'sliders', () => { S.saveUI({ showAdvancedResults: true, showSensitivity: true }); S.emit('result'); }, { keywords: 'ranging allowable increase decrease shadow' });
     act('Take the guided tour', 'compass', () => N.Tour.start(), { keywords: 'help onboarding learn intro' });
@@ -247,6 +246,7 @@
     const resCol = document.getElementById('results-col');
     N.Results.ResultsPanel(resCol);
     O.tooltips();
+    if (N.Motion) N.Motion.press(document.body);
     shortcuts();
     N.IO.dropZone();
     await N.IO.openFromHash();
@@ -266,6 +266,7 @@
     if (qs.has('tour')) setTimeout(() => N.Tour.start(), 120);
     if (qs.has('guide')) N.Help.guide(qs.get('guide') || undefined);
     if (qs.has('wizard')) setTimeout(() => N.Wizard.open(qs.get('wizard') || undefined), 60);
+    if (qs.has('install')) setTimeout(() => N.PWA.install(), 300);
     if (qs.has('test')) runTests();
     else if (!qs.has('tour') && !S.model.variables.length && E.isBlank(S.model.goal.expr) && !S.library.length && window.matchMedia('(min-width: 1101px)').matches) goal.focus();
     document.body.classList.add('is-ready');

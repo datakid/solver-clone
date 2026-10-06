@@ -1,13 +1,16 @@
-const VERSION = 'nadir-v4.0.3';
+const VERSION = 'nadir-v5.1.0';
 const CORE = [
   './',
   'index.html',
   'manifest.webmanifest',
-  'images/nadir-icon.png',
+  'images/icon-1024.png',
+  'images/icon-maskable-1024.png',
   'css/base.css',
   'css/components.css',
   'css/layout.css',
   'css/polish.css',
+  'css/motion.css',
+  'css/install.css',
   'js/engine/core.js',
   'js/engine/syntax.js',
   'js/engine/ir.js',
@@ -24,6 +27,7 @@ const CORE = [
   'js/engine/guide.js',
   'js/engine/tests.js',
   'js/app/util.js',
+  'js/app/motion.js',
   'js/app/store.js',
   'js/app/worker-host.js',
   'js/app/overlays.js',

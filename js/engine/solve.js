@@ -6,7 +6,7 @@ NadirEngine.define('solve', function (E) {
     balanced: { label: 'Balanced', tol: 1e-8, timeLimit: 10, multistart: 4, gap: 0.0001, patience: 150 },
     thorough: { label: 'Thorough', tol: 1e-10, timeLimit: 60, multistart: 16, gap: 0, patience: 400 }
   };
-  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true, lpMethod: 'auto', presolve: true, cuts: true, ranging: true, reform: true }, PRESETS.balanced);
+  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true, lpMethod: 'auto', presolve: true, cuts: true, ranging: true, reform: true, bigM: true }, PRESETS.balanced);
 
   function resolveSettings(s) {
     const out = Object.assign({}, DEFAULTS, s || {});
@@ -16,7 +16,7 @@ NadirEngine.define('solve', function (E) {
     }
     out.timeLimit = Math.max(0.05, out.timeLimit);
     out.lpMethod = ['auto', 'revised', 'dense'].includes(out.lpMethod) ? out.lpMethod : 'auto';
-    for (const k of ['presolve', 'cuts', 'ranging', 'reform']) out[k] = out[k] !== false && out[k] !== 'false';
+    for (const k of ['presolve', 'cuts', 'ranging', 'reform', 'bigM']) out[k] = out[k] !== false && out[k] !== 'false';
     if (out.warm && !Array.isArray(out.warm)) out.warm = null;
     out.multistart = Math.max(1, Math.round(out.multistart));
     return out;
@@ -48,9 +48,10 @@ NadirEngine.define('solve', function (E) {
     out.kinked = kinked;
     const want = (settings && settings.engine) || 'auto';
     if (!linear && kinked && !nonsmooth && (!settings || settings.reform !== false) && (want === 'auto' || want === 'simplex') && E.reformulate) {
-      const R = E.reformulate(C, rowsIdx);
+      const R = E.reformulate(C, rowsIdx, { bigM: !settings || settings.bigM !== false });
       if (R) {
         out.reform = R;
+        if (R.binaries && R.binaries.length) out.hasInt = true;
         out.goalLin = R.goalLin;
         out.rowLin = R.rowLin;
         out.goalLinear = true;
@@ -106,8 +107,10 @@ NadirEngine.define('solve', function (E) {
     if (C.sense !== 'target') for (const [j, a] of A.goalLin.m) if (j >= C.n) c2[j] = a;
     const lower = new Float64Array(N).fill(-Infinity), upper = new Float64Array(N).fill(Infinity);
     lower.set(C.lower); upper.set(C.upper);
+    if (R.auxLo) { lower.set(R.auxLo, C.n); upper.set(R.auxHi, C.n); }
     const hint = new Uint8Array(N);
     hint.set(C.integer);
+    for (const z of R.binaries || []) hint[z] = 1;
     for (const r of R.rows) { rows.push(r); src.push(-2); }
     return { n: N, c: c2, c0, rows, src, lower, upper, maximize, integerHint: hint, base: C.n, aux: R.nAux };
   }
@@ -285,7 +288,7 @@ NadirEngine.define('solve', function (E) {
       const BIG = 1e7;
       const lo = Float64Array.from(LP.lower, (v) => Math.max(v, -BIG));
       const hi = Float64Array.from(LP.upper, (v) => Math.min(v, BIG));
-      if (LP.aux) for (let j = C.n; j < LP.n; j++) { lo[j] = -Infinity; hi[j] = Infinity; }
+      if (LP.aux) for (let j = C.n; j < LP.n; j++) { lo[j] = LP.lower[j]; hi[j] = LP.upper[j]; }
       const r = E.solveLP(Object.assign({}, LP, { lower: lo, upper: hi }), { deadline });
       if (!r.x) return [];
       const out = [];
@@ -366,12 +369,11 @@ NadirEngine.define('solve', function (E) {
     const A = analyze(C, settings);
     const engine = chooseEngine(A, settings);
     if (!engine) return done({ status: 'error', message: 'Simplex needs every line to be linear. Switch the engine to Auto.', engine: null, nonlinearRules: A.nonlinearRules });
-    const pwl = A.reform ? { pieces: A.reform.nAux, kinds: A.reform.kinds } : null;
+    const pwl = A.reform ? { pieces: A.reform.nAux - ((A.reform.binaries || []).length), switches: (A.reform.binaries || []).length, kinds: A.reform.kinds } : null;
 
     const pack = (status, x, extra) => {
       x = head(x, C.n);
       if (extra && extra.reduced) extra.reduced = head(extra.reduced, C.n);
-      if (extra && extra.ranging && !extra.ranging.skipped && pwl) extra.ranging = { skipped: true, reason: 'Sensitivity ranges are not shown for models with abs / max / min — the shadow prices above still apply' };
       if (extra && extra.ranging && !extra.ranging.skipped && extra.ranging.cols) extra.ranging.cols = extra.ranging.cols.slice(0, C.n);
       const rg = extra && extra.ranging && !extra.ranging.skipped ? extra.ranging : null;
       const rep = x ? rowReport(C, x, A.rowsIdx, extra && extra.duals, rg ? rg.rows : null) : { rows: [], goal: NaN };
@@ -379,7 +381,8 @@ NadirEngine.define('solve', function (E) {
       return done(Object.assign({
         status, engine, engineLabel: ENGINE_LABEL[engine], objective: x ? clean(rep.goal) : null,
         values, constraints: rep.rows, reducedCosts: extra && extra.reduced ? Array.from(extra.reduced, clean) : null,
-        costRanges: rg ? rg.cols.map((c) => ({ inc: clean(c.inc), dec: clean(c.dec) })) : null,
+        costRanges: rg ? rg.cols.map((c) => (c.fixed ? { inc: null, dec: null, fixed: true } : { inc: clean(c.inc), dec: clean(c.dec) })) : null,
+        rangingFixedInt: rg && rg.fixedInt ? true : undefined,
         objWeights: rg && C.sense !== 'target' ? Array.from(A.goalLin ? (() => { const w = new Array(C.n).fill(0); for (const [j, a] of A.goalLin.m) if (j < C.n) w[j] = clean(a); return w; })() : []) : null,
         rangingNote: extra && extra.ranging && extra.ranging.skipped ? extra.ranging.reason : null,
         iterations: extra && extra.iterations, sense: C.sense, target: C.target, pwl
@@ -404,6 +407,14 @@ NadirEngine.define('solve', function (E) {
       const iters = engine === 'bb' ? r.iterations : r.iterations;
       const metric = engine === 'bb' ? { nodes: r.nodes, pivots: r.iterations, gap: r.gap, mip: r.stats || null } : { pivots: r.iterations, lpMethod: r.method || 'dense', lu: r.lu || null };
       if (r.status === 'optimal' || r.status === 'feasible') {
+        if (engine === 'bb') {
+          const fx = fixedIntegerLP(LP, r, settings, C.sense !== 'target');
+          if (fx) {
+            metric.fixedDuals = true;
+            const duals = Float64Array.from(A.rowsIdx.map((_, k) => fx.duals[k]));
+            return pack(r.status, fx.x, { duals, reduced: fx.reduced, ranging: fx.ranging, iterations: iters, more: metric });
+          }
+        }
         const duals = engine === 'simplex' && r.duals ? Float64Array.from(A.rowsIdx.map((_, k) => r.duals[k])) : null;
         return pack(r.status, r.x, { duals, reduced: engine === 'simplex' ? r.reduced : null, ranging: engine === 'simplex' ? r.ranging : null, iterations: iters, more: metric });
       }
@@ -477,6 +488,24 @@ NadirEngine.define('solve', function (E) {
     return pack(status, best.x, { iterations: R.iter, more });
   }
 
+  function fixedIntegerLP(LP, r, settings, wantRanging) {
+    try {
+      if (!r.x || settings.lpMethod === 'dense') return null;
+      const isInt = LP.integerHint;
+      const lo = Float64Array.from(LP.lower), hi = Float64Array.from(LP.upper);
+      for (let j = 0; j < LP.n; j++) if (isInt[j]) { const v = Math.round(r.x[j]); lo[j] = v; hi[j] = v; }
+      const fx = E.solveLP(LP, { lower: lo, upper: hi, deadline: Date.now() + 3000, maxIter: settings.maxIter, ranging: settings.ranging && wantRanging, method: 'revised' });
+      if (fx.status !== 'optimal' || !fx.duals) return null;
+      if (Math.abs(fx.obj - r.obj) > 1e-6 * Math.max(1, Math.abs(r.obj))) return null;
+      if (fx.ranging && !fx.ranging.skipped) {
+        fx.ranging.cols = fx.ranging.cols.map((c, j) => (isInt[j] ? { inc: null, dec: null, fixed: true } : c));
+        fx.ranging.fixedInt = true;
+      }
+      if (fx.reduced) fx.reduced = Array.from(fx.reduced, (v, j) => (isInt[j] ? null : v));
+      return fx;
+    } catch (e) { return null; }
+  }
+
   function sign(C, f) {
     if (C.sense === 'max') return -f;
     return f;
@@ -508,7 +537,8 @@ NadirEngine.define('solve', function (E) {
       const s = resolveSettings(settings);
       const A = analyze(C, s);
       const engine = chooseEngine(A, s);
-      return { engine, label: engine ? ENGINE_LABEL[engine] : null, linear: A.linear || !!A.reform, hasInt: A.hasInt, nonsmooth: A.nonsmooth, nonlinearRules: A.nonlinearRules, pwl: !!A.reform, pwlRules: A.pwlRules || [], pieces: A.reform ? A.reform.nAux : 0 };
+      const sw = A.reform && A.reform.binaries ? A.reform.binaries.length : 0;
+      return { engine, label: engine ? ENGINE_LABEL[engine] : null, linear: A.linear || !!A.reform, hasInt: A.hasInt, nonsmooth: A.nonsmooth, nonlinearRules: A.nonlinearRules, pwl: !!A.reform, pwlRules: A.pwlRules || [], pieces: A.reform ? A.reform.nAux - sw : 0, switches: sw };
     } catch (e) { return null; }
   }
 
@@ -554,7 +584,9 @@ NadirEngine.define('solve', function (E) {
         else names.push(sanitize(`${v.name}_${i + 1}`));
       }
     });
-    for (let j = C.n; j < LP.n; j++) names.push('aux_' + (j - C.n + 1));
+    const switchSet = new Set((A.reform && A.reform.binaries) || []);
+    let ai = 0, si = 0;
+    for (let j = C.n; j < LP.n; j++) names.push(switchSet.has(j) ? 'switch_' + (++si) : 'aux_' + (++ai));
     const num = (x) => {
       const r = Math.round(x);
       if (Math.abs(x - r) < 1e-12) return String(r);
@@ -614,6 +646,7 @@ NadirEngine.define('solve', function (E) {
       }
     });
     if (gen.length) { L.push('General'); L.push(wrap(' ' + gen.join(' '))); }
+    for (const z of switchSet) bin.push(names[z]);
     if (bin.length) { L.push('Binary'); L.push(wrap(' ' + bin.join(' '))); }
     L.push('End');
     return { text: L.join('\n') + '\n' };

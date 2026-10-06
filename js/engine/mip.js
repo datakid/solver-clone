@@ -215,6 +215,70 @@ NadirEngine.define('mip', function (E) {
     return cuts;
   }
 
+  function coverCuts(P, isInt, x, lo, up, maxCuts) {
+    const cuts = [];
+    const n = P.n;
+    const isBin = (j) => isInt[j] && lo[j] === 0 && up[j] === 1;
+    const seen = new Set();
+    const tryRow = (idx, val, rhs) => {
+      const items = [];
+      let b = rhs;
+      for (let k = 0; k < idx.length; k++) {
+        const j = idx[k], a = val[k];
+        if (a === 0) continue;
+        if (isBin(j)) {
+          if (a > 0) items.push({ j, a, comp: false, xs: x[j] });
+          else { items.push({ j, a: -a, comp: true, xs: 1 - x[j] }); b -= a; }
+        } else {
+          const mn = a > 0 ? a * lo[j] : a * up[j];
+          if (!Number.isFinite(mn)) return;
+          b -= mn;
+        }
+      }
+      if (items.length < 2 || b < 0) return;
+      let total = 0;
+      for (const it of items) total += it.a;
+      if (total <= b + 1e-9) return;
+      items.sort((p, q) => (1 - p.xs) / p.a - (1 - q.xs) / q.a || q.a - p.a);
+      const C = [];
+      let w = 0;
+      for (const it of items) { if (w > b + 1e-9) break; C.push(it); w += it.a; }
+      if (w <= b + 1e-9) return;
+      C.sort((p, q) => p.a - q.a);
+      for (let k = 0; k < C.length && C.length > 2;) {
+        if (w - C[k].a > b + 1e-9 && C[k].xs < 1 - 1e-9) { w -= C[k].a; C.splice(k, 1); } else k++;
+      }
+      let amax = 0;
+      for (const it of C) amax = Math.max(amax, it.a);
+      const inC = new Set(C.map((it) => it.j));
+      const ext = C.slice();
+      for (const it of items) if (!inC.has(it.j) && it.a >= amax - 1e-12) ext.push(it);
+      let lhs = 0;
+      for (const it of ext) lhs += it.xs;
+      const k1 = C.length - 1;
+      const viol = lhs - k1;
+      if (viol < 1e-4) return;
+      const cidx = [], cval = [];
+      let r = k1;
+      for (const it of ext) { cidx.push(it.j); if (it.comp) { cval.push(-1); r -= 1; } else cval.push(1); }
+      const key = cidx.slice().sort((p, q) => p - q).join(',') + '|' + cval.join(',');
+      if (seen.has(key)) return;
+      seen.add(key);
+      cuts.push({ idx: cidx, val: cval, op: '<=', rhs: r + 1e-9, cut: true, cover: true, eff: viol / Math.sqrt(ext.length) });
+    };
+    for (const row of P.rows) {
+      if (row.cut || row.idx.length < 2 || row.idx.length > 400) continue;
+      let any = false;
+      for (const j of row.idx) if (isBin(j)) { any = true; break; }
+      if (!any) continue;
+      if (row.op === '<=' || row.op === '=') tryRow(row.idx, row.val, row.rhs);
+      if (row.op === '>=' || row.op === '=') tryRow(row.idx, row.val.map((a) => -a), -row.rhs);
+      if (cuts.length >= maxCuts * 2) break;
+    }
+    cuts.sort((p, q) => q.eff - p.eff);
+    return cuts.slice(0, maxCuts);
+  }
+
   function roundAndFix(P, isInt, x, lo, up, deadline) {
     const L = Float64Array.from(lo), U = Float64Array.from(up);
     for (let j = 0; j < P.n; j++) if (isInt[j]) { const v = Math.min(U[j], Math.max(L[j], Math.round(x[j]))); L[j] = v; U[j] = v; }
@@ -242,7 +306,7 @@ NadirEngine.define('mip', function (E) {
     const nodeLimit = o.nodeLimit || 100000;
     const gap = o.gap == null ? 1e-4 : o.gap;
     const dir = P0.maximize ? -1 : 1;
-    const stats = { presolve: null, cuts: 0, cutRounds: 0, heuristic: 0, warm: 0 };
+    const stats = { presolve: null, cuts: 0, cutRounds: 0, heuristic: 0, warm: 0, covers: 0, gomory: 0, dualPivots: 0, primalPivots: 0 };
     let P = P0;
     if (o.presolve !== false) {
       const pre = presolve(P0, isInt);
@@ -289,9 +353,30 @@ NadirEngine.define('mip', function (E) {
       }
       return bj;
     };
+    const pcSum = [new Float64Array(n), new Float64Array(n)], pcCnt = [new Int32Array(n), new Int32Array(n)];
+    let pcAll = [0, 0], pcN = [0, 0];
+    const pcLearn = (j, side, frac, gain) => {
+      if (!(frac > 1e-9) || !Number.isFinite(gain)) return;
+      const g = Math.max(0, gain) / frac;
+      pcSum[side][j] += g; pcCnt[side][j]++; pcAll[side] += g; pcN[side]++;
+    };
+    const pcGet = (j, side) => (pcCnt[side][j] ? pcSum[side][j] / pcCnt[side][j] : pcN[side] ? pcAll[side] / pcN[side] : 1);
+    const pickBranch = (x) => {
+      if (pcN[0] + pcN[1] < 4) return fractional(x);
+      let bj = -1, bs = -1;
+      for (let j = 0; j < n; j++) {
+        if (!isInt[j]) continue;
+        const f = x[j] - Math.floor(x[j]);
+        if (Math.min(f, 1 - f) <= ITOL) continue;
+        const s = Math.max(pcGet(j, 0) * f, 1e-6) * Math.max(pcGet(j, 1) * (1 - f), 1e-6);
+        if (s > bs) { bs = s; bj = j; }
+      }
+      return bj;
+    };
+    const tally = (r) => { pivots += r.iterations || 0; stats.dualPivots += r.dual || 0; stats.primalPivots += (r.iterations || 0) - (r.dual || 0); };
 
     let root = E.solveLP(P, { deadline, maxIter: o.maxIter });
-    pivots += root.iterations || 0;
+    tally(root);
     if (root.status === 'limit') return { status: 'stopped', nodes: 0, iterations: pivots, stats };
     if (root.status === 'infeasible') return { status: 'infeasible', nodes: 1, iterations: pivots, stats };
     if (root.status === 'unbounded') return { status: 'unbounded', nodes: 1, iterations: pivots, stats };
@@ -302,14 +387,17 @@ NadirEngine.define('mip', function (E) {
       let lastObj = root.obj * dir;
       for (let round = 0; round < maxRounds && Date.now() < deadline; round++) {
         if (fractional(root.x) < 0 || !root.state) break;
-        const cuts = gomoryCuts(P, isInt, root.state, root.x, Math.min(40, Math.max(8, n >> 2)));
+        const cap = Math.min(40, Math.max(8, n >> 2));
+        const cov = coverCuts(P, isInt, root.x, P.lower, P.upper, cap);
+        const gom = gomoryCuts(P, isInt, root.state, root.x, cap);
+        const cuts = cov.concat(gom);
         if (!cuts.length) break;
         const rows = P.rows.concat(cuts);
         const next = E.solveLP(Object.assign({}, P, { rows }), { deadline, maxIter: o.maxIter, basis: root.basis });
-        pivots += next.iterations || 0;
+        tally(next);
         if (next.status !== 'optimal') break;
         P = Object.assign({}, P, { rows });
-        stats.cuts += cuts.length; stats.cutRounds++;
+        stats.cuts += cuts.length; stats.cutRounds++; stats.covers += cov.length; stats.gomory += gom.length;
         root = next;
         const now = root.obj * dir;
         if (Math.abs(now - lastObj) < 1e-6 * Math.max(1, Math.abs(lastObj))) break;
@@ -319,7 +407,7 @@ NadirEngine.define('mip', function (E) {
     if (fractional(root.x) < 0) offer(root);
     else if (offer(roundAndFix(P, isInt, root.x, P.lower, P.upper, deadline))) stats.heuristic++;
 
-    const keepBasis = (P.n + P.rows.length) <= 6000;
+    const keepBasis = (P.n + P.rows.length) <= 20000;
     const stack = [];
     let heap = null;
     const add = (nd) => { if (heap) heap.push(nd); else stack.push(nd); };
@@ -329,13 +417,14 @@ NadirEngine.define('mip', function (E) {
     let unbounded = false, stopped = false;
 
     function branch(nd, r) {
-      const bj = fractional(r.x);
+      const bj = pickBranch(r.x);
       const val = r.obj * dir;
       const v = r.x[bj];
+      const f = v - Math.floor(v);
       const basis = keepBasis ? r.basis : null;
-      const down = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj };
+      const down = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj, side: 0, frac: f };
       down.hi[bj] = Math.floor(v);
-      const up = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj };
+      const up = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj, side: 1, frac: 1 - f };
       up.lo[bj] = Math.ceil(v);
       if (v - Math.floor(v) >= 0.5) { add(down); add(up); } else { add(up); add(down); }
     }
@@ -353,12 +442,14 @@ NadirEngine.define('mip', function (E) {
       const pr = propagate(P.rows, nd.lo, nd.hi, isInt, { passes: 2 });
       if (pr.infeasible) continue;
       const r = E.solveLP(P, { lower: nd.lo, upper: nd.hi, deadline, maxIter: o.maxIter, basis: nd.basis });
+      nd.basis = null;
       if (r.warm) stats.warm++;
-      pivots += r.iterations || 0;
+      tally(r);
       if (r.status === 'limit') { stopped = true; break; }
       if (r.status === 'infeasible') continue;
       if (r.status === 'unbounded') { if (!inc) { unbounded = true; break; } continue; }
       const val = r.obj * dir;
+      if (nd.j != null) pcLearn(nd.j, nd.side, nd.frac, val - nd.bound);
       if (val >= pruneAt()) continue;
       if (fractional(r.x) < 0) { offer(r); toHeap(); continue; }
       if ((nodes % 40 === 0 || (!inc && nd.depth % 6 === 0)) && offer(roundAndFix(P, isInt, r.x, nd.lo, nd.hi, deadline))) { stats.heuristic++; toHeap(); if (val >= pruneAt()) continue; }
@@ -383,5 +474,6 @@ NadirEngine.define('mip', function (E) {
   E.presolveMIP = presolve;
   E.propagateBounds = propagate;
   E.gomoryCuts = gomoryCuts;
+  E.coverCuts = coverCuts;
   E.solveMIP = mip;
 });
