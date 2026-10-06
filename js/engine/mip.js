@@ -279,6 +279,117 @@ NadirEngine.define('mip', function (E) {
     return cuts.slice(0, maxCuts);
   }
 
+  function flowCuts(P, isInt, x, lo, up, maxCuts) {
+    const cuts = [];
+    const n = P.n;
+    const vub = new Map();
+    for (const r of P.rows) {
+      if (r.cut || r.idx.length !== 2 || r.op === '=') continue;
+      const s = r.op === '<=' ? 1 : -1;
+      for (let t = 0; t < 2; t++) {
+        const yj = r.idx[t], ya = r.val[t] * s, zj = r.idx[1 - t], za = r.val[1 - t] * s;
+        if (isInt[yj] || !isInt[zj] || lo[zj] !== 0 || up[zj] !== 1 || lo[yj] !== 0) continue;
+        if (ya <= 0 || za >= 0 || Math.abs(r.rhs) > 1e-12) continue;
+        const u = -za / ya;
+        const cur = vub.get(yj);
+        if (!cur || u < cur.u) vub.set(yj, { z: zj, u });
+      }
+    }
+    if (!vub.size) return cuts;
+    for (const r of P.rows) {
+      if (r.cut || r.op === '=' || r.idx.length < 2 || r.idx.length > 200) continue;
+      const s = r.op === '<=' ? 1 : -1;
+      const items = [];
+      let b = r.rhs * s, ok = true;
+      for (let k = 0; k < r.idx.length; k++) {
+        const j = r.idx[k], a = r.val[k] * s;
+        const vb = vub.get(j);
+        if (a > 0 && vb && !isInt[j]) items.push({ j, z: vb.z, m: a * vb.u, a });
+        else if (a < 0) { if (up[j] === Infinity) { ok = false; break; } b -= a * up[j]; }
+        else { if (lo[j] === -Infinity) { ok = false; break; } b -= a * lo[j]; }
+      }
+      if (!ok || items.length < 2 || b <= 1e-9) continue;
+      items.sort((p, q) => x[q.z] - x[p.z] || q.m - p.m);
+      const C = [];
+      let tot = 0;
+      for (const it of items) { if (tot > b + 1e-9) break; if (x[it.z] > 1e-6) { C.push(it); tot += it.m; } }
+      const lam = tot - b;
+      if (lam <= 1e-6 || C.length < 2) continue;
+      const idx = [], val = [];
+      let rhs = b, act = 0;
+      for (const it of C) {
+        idx.push(it.j); val.push(it.a);
+        act += it.a * x[it.j];
+        const coef = Math.max(0, it.m - lam);
+        if (coef > 1e-12) { idx.push(it.z); val.push(-coef); act -= coef * x[it.z]; rhs -= coef; }
+      }
+      const viol = act - rhs;
+      if (viol < 1e-5 * Math.max(1, Math.abs(rhs))) continue;
+      let nrm = 0;
+      for (const v of val) nrm += v * v;
+      cuts.push({ idx, val, op: '<=', rhs: rhs + 1e-9, cut: true, flow: true, eff: viol / Math.sqrt(nrm) });
+    }
+    cuts.sort((p, q) => q.eff - p.eff);
+    return cuts.slice(0, maxCuts);
+  }
+
+  function cliqueCuts(P, isInt, x, lo, up, maxCuts) {
+    const n = P.n;
+    const isBin = (j) => isInt[j] && lo[j] === 0 && up[j] === 1;
+    const adj = new Map();
+    const link = (a, b) => { if (!adj.has(a)) adj.set(a, new Set()); if (!adj.has(b)) adj.set(b, new Set()); adj.get(a).add(b); adj.get(b).add(a); };
+    let edges = 0;
+    for (const r of P.rows) {
+      if (r.cut || r.op === '=' || r.idx.length < 2 || r.idx.length > 60) continue;
+      const s = r.op === '<=' ? 1 : -1;
+      let b = r.rhs * s, ok = true;
+      const bins = [];
+      for (let k = 0; k < r.idx.length; k++) {
+        const j = r.idx[k], a = r.val[k] * s;
+        if (isBin(j) && a > 0) bins.push([j, a]);
+        else if (a > 0) { if (lo[j] === -Infinity) { ok = false; break; } b -= a * lo[j]; }
+        else { if (up[j] === Infinity) { ok = false; break; } b -= a * up[j]; }
+      }
+      if (!ok || bins.length < 2) continue;
+      bins.sort((p, q) => q[1] - p[1]);
+      for (let p = 0; p < bins.length && edges < 20000; p++) {
+        for (let q = p + 1; q < bins.length; q++) {
+          if (bins[p][1] + bins[q][1] <= b + 1e-9) break;
+          link(bins[p][0], bins[q][0]); edges++;
+        }
+      }
+    }
+    if (!edges) return [];
+    const cuts = [], seen = new Set();
+    const order = [...adj.keys()].filter((j) => x[j] > 1e-6).sort((p, q) => x[q] - x[p]);
+    for (const s0 of order) {
+      const K = [s0];
+      let cand = [...adj.get(s0)].filter((j) => x[j] > 1e-9).sort((p, q) => x[q] - x[p]);
+      while (cand.length) {
+        const v = cand.shift();
+        K.push(v);
+        const nb = adj.get(v);
+        cand = cand.filter((j) => nb.has(j));
+      }
+      if (K.length < 3) continue;
+      for (const j of adj.keys()) {
+        if (K.includes(j)) continue;
+        const nb = adj.get(j);
+        if (K.every((k) => nb.has(k))) K.push(j);
+      }
+      let act = 0;
+      for (const j of K) act += x[j];
+      if (act < 1 + 1e-4) continue;
+      const key = K.slice().sort((p, q) => p - q).join(',');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cuts.push({ idx: K, val: K.map(() => 1), op: '<=', rhs: 1 + 1e-9, cut: true, clique: true, eff: (act - 1) / Math.sqrt(K.length) });
+      if (cuts.length >= maxCuts * 2) break;
+    }
+    cuts.sort((p, q) => q.eff - p.eff);
+    return cuts.slice(0, maxCuts);
+  }
+
   function roundAndFix(P, isInt, x, lo, up, deadline) {
     const L = Float64Array.from(lo), U = Float64Array.from(up);
     for (let j = 0; j < P.n; j++) if (isInt[j]) { const v = Math.min(U[j], Math.max(L[j], Math.round(x[j]))); L[j] = v; U[j] = v; }
@@ -306,7 +417,7 @@ NadirEngine.define('mip', function (E) {
     const nodeLimit = o.nodeLimit || 100000;
     const gap = o.gap == null ? 1e-4 : o.gap;
     const dir = P0.maximize ? -1 : 1;
-    const stats = { presolve: null, cuts: 0, cutRounds: 0, heuristic: 0, warm: 0, covers: 0, gomory: 0, dualPivots: 0, primalPivots: 0 };
+    const stats = { presolve: null, cuts: 0, cutRounds: 0, heuristic: 0, warm: 0, covers: 0, gomory: 0, flows: 0, cliques: 0, strong: 0, dualPivots: 0, primalPivots: 0 };
     let P = P0;
     if (o.presolve !== false) {
       const pre = presolve(P0, isInt);
@@ -361,17 +472,40 @@ NadirEngine.define('mip', function (E) {
       pcSum[side][j] += g; pcCnt[side][j]++; pcAll[side] += g; pcN[side]++;
     };
     const pcGet = (j, side) => (pcCnt[side][j] ? pcSum[side][j] / pcCnt[side][j] : pcN[side] ? pcAll[side] / pcN[side] : 1);
-    const pickBranch = (x) => {
-      if (pcN[0] + pcN[1] < 4) return fractional(x);
-      let bj = -1, bs = -1;
+    const REL = o.reliability == null ? 4 : o.reliability;
+    const score = (d0, d1) => Math.max(d0, 1e-6) * Math.max(d1, 1e-6);
+    const strongBudget = { left: o.strong === false ? 0 : Math.max(40, Math.min(400, n * 4)) };
+    const pickBranch = (x, nd, r) => {
+      const fr = [];
       for (let j = 0; j < n; j++) {
         if (!isInt[j]) continue;
         const f = x[j] - Math.floor(x[j]);
         if (Math.min(f, 1 - f) <= ITOL) continue;
-        const s = Math.max(pcGet(j, 0) * f, 1e-6) * Math.max(pcGet(j, 1) * (1 - f), 1e-6);
-        if (s > bs) { bs = s; bj = j; }
+        fr.push({ j, f, s: score(pcGet(j, 0) * f, pcGet(j, 1) * (1 - f)) });
       }
-      return bj;
+      if (!fr.length) return -1;
+      fr.sort((a, b) => b.s - a.s);
+      const unrel = nd && r && r.basis ? fr.filter((c) => Math.min(pcCnt[0][c.j], pcCnt[1][c.j]) < REL).slice(0, 8) : [];
+      if (!unrel.length || strongBudget.left <= 0 || Date.now() > deadline) return fr[0].j;
+      const base = r.obj * dir;
+      let best = fr[0], bestS = fr[0].s;
+      for (const c of unrel) {
+        if (strongBudget.left <= 0) break;
+        const d = [0, 0];
+        for (const side of [0, 1]) {
+          const L = Float64Array.from(nd.lo), U = Float64Array.from(nd.hi);
+          if (side === 0) U[c.j] = Math.floor(x[c.j]); else L[c.j] = Math.ceil(x[c.j]);
+          const t = E.solveLP(P, { lower: L, upper: U, basis: r.basis, maxIter: 60, deadline });
+          strongBudget.left--; stats.strong++;
+          tally(t);
+          if (t.status === 'infeasible') d[side] = 1e12;
+          else if (t.status === 'optimal') { d[side] = Math.max(0, t.obj * dir - base); pcLearn(c.j, side, side ? 1 - c.f : c.f, d[side]); }
+          else d[side] = side ? pcGet(c.j, 1) * (1 - c.f) : pcGet(c.j, 0) * c.f;
+        }
+        const s = score(d[0], d[1]);
+        if (s > bestS) { bestS = s; best = c; }
+      }
+      return best.j;
     };
     const tally = (r) => { pivots += r.iterations || 0; stats.dualPivots += r.dual || 0; stats.primalPivots += (r.iterations || 0) - (r.dual || 0); };
 
@@ -389,15 +523,17 @@ NadirEngine.define('mip', function (E) {
         if (fractional(root.x) < 0 || !root.state) break;
         const cap = Math.min(40, Math.max(8, n >> 2));
         const cov = coverCuts(P, isInt, root.x, P.lower, P.upper, cap);
+        const flo = flowCuts(P, isInt, root.x, P.lower, P.upper, cap);
+        const clq = cliqueCuts(P, isInt, root.x, P.lower, P.upper, cap);
         const gom = gomoryCuts(P, isInt, root.state, root.x, cap);
-        const cuts = cov.concat(gom);
+        const cuts = clq.concat(cov, flo, gom);
         if (!cuts.length) break;
         const rows = P.rows.concat(cuts);
         const next = E.solveLP(Object.assign({}, P, { rows }), { deadline, maxIter: o.maxIter, basis: root.basis });
         tally(next);
         if (next.status !== 'optimal') break;
         P = Object.assign({}, P, { rows });
-        stats.cuts += cuts.length; stats.cutRounds++; stats.covers += cov.length; stats.gomory += gom.length;
+        stats.cuts += cuts.length; stats.cutRounds++; stats.covers += cov.length; stats.gomory += gom.length; stats.flows += flo.length; stats.cliques += clq.length;
         root = next;
         const now = root.obj * dir;
         if (Math.abs(now - lastObj) < 1e-6 * Math.max(1, Math.abs(lastObj))) break;
@@ -417,7 +553,7 @@ NadirEngine.define('mip', function (E) {
     let unbounded = false, stopped = false;
 
     function branch(nd, r) {
-      const bj = pickBranch(r.x);
+      const bj = pickBranch(r.x, nd, r);
       const val = r.obj * dir;
       const v = r.x[bj];
       const f = v - Math.floor(v);
@@ -475,5 +611,7 @@ NadirEngine.define('mip', function (E) {
   E.propagateBounds = propagate;
   E.gomoryCuts = gomoryCuts;
   E.coverCuts = coverCuts;
+  E.flowCuts = flowCuts;
+  E.cliqueCuts = cliqueCuts;
   E.solveMIP = mip;
 });

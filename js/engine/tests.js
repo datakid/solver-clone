@@ -483,6 +483,100 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
+        name: 'v5.2 · LP presolve (singletons, doubletons, dominated columns) matches the plain solve on 60 LPs', run() {
+          const rand = E.mulberry32(77);
+          const bad = [];
+          let shrunk = 0;
+          for (let t = 0; t < 60 && bad.length < 3; t++) {
+            const n = 6 + Math.floor(rand() * 14), m = 4 + Math.floor(rand() * 10);
+            const rows = [];
+            for (let i = 0; i < m; i++) {
+              const kind = rand();
+              const idx = [], val = [];
+              if (kind < 0.2) { idx.push(Math.floor(rand() * n)); val.push(1 + Math.round(rand() * 4)); rows.push({ idx, val, op: rand() < 0.5 ? '<=' : '>=', rhs: Math.round(rand() * 12) }); continue; }
+              if (kind < 0.4) { const a = Math.floor(rand() * n); let b = Math.floor(rand() * n); if (b === a) b = (a + 1) % n; rows.push({ idx: [a, b], val: [1 + Math.round(rand() * 3), -(1 + Math.round(rand() * 3))], op: '=', rhs: Math.round(rand() * 6 - 3) }); continue; }
+              for (let j = 0; j < n; j++) if (rand() < 0.5) { idx.push(j); val.push(1 + Math.round(rand() * 9)); }
+              rows.push({ idx, val, op: rand() < 0.8 ? '<=' : '>=', rhs: rand() < 0.8 ? 20 + Math.round(rand() * 60) : Math.round(rand() * 5) });
+            }
+            const lower = Float64Array.from({ length: n }, () => (rand() < 0.1 ? -5 : 0));
+            const upper = Float64Array.from({ length: n }, () => 5 + Math.round(rand() * 20));
+            const P = { n, c: Float64Array.from({ length: n }, () => Math.round(rand() * 16 - 6)), c0: 0, rows, lower, upper, maximize: rand() < 0.5 };
+            const a = E.solveDense(P, {});
+            const b = E.solveLP(P, { presolve: 'force' });
+            if (b.presolve) shrunk++;
+            else if (a.status === 'optimal') bad.push(`#${t} presolve skipped (${E.__psWhy})`);
+            if (a.status !== b.status) { if (!(a.status !== 'optimal' && b.status !== 'optimal')) bad.push(`#${t} ${a.status} vs ${b.status}`); continue; }
+            if (a.status !== 'optimal') continue;
+            if (!close(a.obj, b.obj, 1e-6)) { bad.push(`#${t} obj ${a.obj} vs ${b.obj}`); continue; }
+            let dualObj = 0, viol = 0;
+            rows.forEach((r, i) => { let s = 0; r.idx.forEach((j, k) => { s += r.val[k] * b.x[j]; }); viol = Math.max(viol, r.op === '<=' ? s - r.rhs : r.op === '>=' ? r.rhs - s : Math.abs(s - r.rhs)); });
+            if (viol > 1e-6 || !b.duals || b.duals.length !== m) bad.push(`#${t} viol ${viol} duals ${b.duals && b.duals.length}`);
+          }
+          return (!bad.length && shrunk >= 30) || (bad.join('; ') || `presolve used on only ${shrunk}`);
+        }
+      },
+      {
+        name: 'v5.2 · Hypersparse FTRAN/BTRAN agree with dense solves after updates', run() {
+          const rand = E.mulberry32(91);
+          const m = 400, pool = [];
+          for (let k = 0; k < m * 2; k++) { const idx = [k % m], val = [2 + rand() * 2]; if (rand() < 0.6) { const i = Math.floor(rand() * m); if (i !== k % m) { idx.push(i); val.push(rand() - 0.5); } } pool.push({ idx, val }); }
+          const head = Int32Array.from({ length: m }, (_, i) => i);
+          const B = E.LUBasis(m, (j) => pool[j], { force: 'sparse', refactorEvery: 1e9 });
+          B.factor(head);
+          const dense = (c) => { const a = new Float64Array(m); c.idx.forEach((i, t) => { a[i] += c.val[t]; }); return a; };
+          let worst = 0;
+          for (let it = 0; it < 120; it++) {
+            const q = m + Math.floor(rand() * m);
+            const w = B.ftran(dense(pool[q]));
+            let r = 0;
+            for (let i = 0; i < m; i++) if (Math.abs(w[i]) > Math.abs(w[r])) r = i;
+            B.update(r, w); head[r] = q;
+            if (B.broken) B.factor(head);
+            const e = new Float64Array(m); e[Math.floor(rand() * m)] = 1;
+            const x = B.ftran(e), y = B.btran(e);
+            const Bx = new Float64Array(m);
+            let yr = 0;
+            for (let k = 0; k < m; k++) { const c = pool[head[k]]; let s = 0; c.idx.forEach((i, t) => { Bx[i] += c.val[t] * x[k]; s += c.val[t] * y[i]; }); yr = Math.max(yr, Math.abs(s - e[k])); }
+            for (let i = 0; i < m; i++) worst = Math.max(worst, Math.abs(Bx[i] - e[i]));
+            worst = Math.max(worst, yr);
+          }
+          return worst < 1e-8 || `residual ${worst.toExponential(2)}`;
+        }
+      },
+      {
+        name: 'v5.2 · Clique and flow cover cuts are valid and fire; reliability branching agrees with classic B&B', run() {
+          const rand = E.mulberry32(13);
+          const bad = [];
+          let cl = 0, fl = 0, strong = 0;
+          for (let t = 0; t < 25 && bad.length < 3; t++) {
+            const k = 4 + Math.floor(rand() * 4);
+            const n = 2 * k;
+            const rows = [];
+            const pairIdx = [], pairVal = [];
+            for (let i = 0; i < k; i++) {
+              const u = 5 + Math.round(rand() * 10);
+              rows.push({ idx: [i, k + i], val: [1, -u], op: '<=', rhs: 0 });
+              pairIdx.push(i); pairVal.push(1);
+            }
+            rows.push({ idx: pairIdx, val: pairVal, op: '<=', rhs: 8 + Math.round(rand() * 10) });
+            for (let a = 0; a < k; a++) for (let b = a + 1; b < k; b++) if (rand() < 0.35) rows.push({ idx: [k + a, k + b], val: [1, 1], op: '<=', rhs: 1 });
+            const c = new Float64Array(n);
+            for (let i = 0; i < k; i++) { c[i] = 2 + Math.round(rand() * 6); c[k + i] = -(1 + Math.round(rand() * 6)); }
+            const isInt = new Uint8Array(n); for (let i = k; i < n; i++) isInt[i] = 1;
+            const upper = new Float64Array(n).fill(Infinity); for (let i = k; i < n; i++) upper[i] = 1;
+            const P = { n, c, c0: 0, rows, lower: new Float64Array(n), upper, maximize: true };
+            const a = E.branchAndBoundClassic(P, isInt, { gap: 0 });
+            const b = E.solveMIP(P, isInt, { gap: 0 });
+            cl += b.stats.cliques; fl += b.stats.flows; strong += b.stats.strong;
+            if (a.status !== b.status || (a.status === 'optimal' && !close(a.obj, b.obj, 1e-6))) bad.push(`#${t} ${a.status} ${a.obj} vs ${b.status} ${b.obj}`);
+          }
+          const x = Float64Array.from([0.6, 0.6, 0.6]);
+          const cq = E.cliqueCuts({ n: 3, rows: [{ idx: [0, 1], val: [1, 1], op: '<=', rhs: 1 }, { idx: [1, 2], val: [1, 1], op: '<=', rhs: 1 }, { idx: [0, 2], val: [1, 1], op: '<=', rhs: 1 }] }, Uint8Array.of(1, 1, 1), x, new Float64Array(3), Float64Array.of(1, 1, 1), 5);
+          if (!cq.length || cq[0].idx.length !== 3) bad.push('triangle clique missed');
+          return (!bad.length && cl + fl > 0) || (bad.join('; ') || `cliques ${cl} flows ${fl} strong ${strong}`);
+        }
+      },
+      {
         name: 'v5 · Sparse 6,000×6,000 LP with Forrest–Tomlin updates', run() {
           const rand = E.mulberry32(23);
           const m = 6000, n = 6000;

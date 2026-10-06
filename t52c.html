@@ -1,0 +1,7 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>t</title></head><body>
+<script src="js/engine/core.js"></script><script src="js/engine/syntax.js"></script><script src="js/engine/ir.js"></script><script src="js/engine/model.js"></script><script src="js/engine/reform.js"></script><script src="js/engine/lu.js"></script><script src="js/engine/revised.js"></script><script src="js/engine/presolve.js"></script><script src="js/engine/lp.js"></script><script src="js/engine/mip.js"></script><script src="js/engine/nlp.js"></script><script src="js/engine/solve.js"></script><script src="js/engine/tests.js"></script>
+<script>
+var res = Engine.runTests(function (n) { return /6,000/.test(n); });
+res.forEach(function (r) { console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + ' ' + r.ms + 'ms ' + (r.ok ? '' : r.detail)); });
+</script></body></html>

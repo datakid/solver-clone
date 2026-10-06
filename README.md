@@ -4,6 +4,21 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## v5.2 — presolve, hypersparse solves, richer cuts, reliability branching
+- **LP presolve** (`js/engine/presolve.js`, runs before the revised simplex when Presolve is on and the model has 300+ rows and columns). It does the following:
+  - Removes empty rows.
+  - Turns singleton rows into bounds.
+  - Substitutes doubleton equalities (a·x + b·y = c), eliminating y and carrying its bounds onto x.
+  - Fixes columns whose bounds are equal.
+  - Fixes empty and dominated columns at their best bound.
+  The reduced LP is solved, then its optimal basis is mapped back onto the full model and a short warm-started clean-up pass (normally 0 pivots) restores exact duals, reduced costs and ranging. Anything unusual (infeasible, unbounded, a basis that won't map back) falls back to the plain solve, so answers never change.
+- **Hypersparse triangular solves** (`lu.js`). FTRAN now walks U column-wise and BTRAN walks L row-wise, so both skip every zero entry instead of computing dot products. This is a big saving on unit and slack columns. The Forrest–Tomlin update keeps the column copies in sync.
+- **Clique cuts.** A conflict graph is built from rows where two binaries can't both be 1, then greedy maximal cliques are lifted into Σx ≤ 1.
+- **Flow cover cuts.** Variable upper bounds y ≤ u·z are detected, and lifted flow covers are separated on single-node flow rows.
+- **Reliability branching.** Pseudo-costs are seeded by strong branching (short dual-simplex probes of both children, at most 60 pivots each) until a variable has 4 observations per side, with a capped budget. Infeasible probes count as huge gains.
+- **Meta line.** It shows the pivot breakdown, e.g. `Simplex LP · 12 ms · 840 pivots (610 primal · 230 dual)`, plus `presolve −R rows −C cols` and `N strong probes`. The story lists the cut families (cliques, knapsack covers, flow covers, Gomory). Also fixed: the meta line said "1 nodes".
+- Tests: **45 engine cases**. New: presolve vs the dense tableau on 60 LPs (objective, feasibility and dual length); hypersparse FTRAN/BTRAN residuals over 120 updates; clique and flow cuts firing and reliability B&B agreeing with classic B&B on 25 fixed-charge models.
+
 ## v5.1 — installing on Safari
 - **Add-to-Home-Screen guide** (`js/app/pwa.js`, `css/install.css`). iOS Safari has no install prompt, so *Install* now opens a sheet written for the browser you're on:
   - **iPhone Safari**: Share → Add to Home Screen → Add, with an animated arrow pointing at the Share button in the bottom toolbar.
@@ -179,12 +194,12 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 
 ## Known limits
 - The LP is single-threaded JavaScript. Around 10⁴ rows takes seconds; 10⁵+ rows would need presolve for LPs, hypersparse FTRAN/BTRAN and LU fill reduction (planned next).
-- MIP has cover and Gomory cuts, but no flow-cover or clique cuts, and there are no restarts.
+- MIP has no restarts, and no conflict analysis or symmetry handling.
 - MIP sensitivity is *conditional*: it is valid with the whole-number decisions held at their best values. NLP results have no ranging.
 - Exact switches need finite ranges on everything inside the `abs`/`max`/`min` (at most 400 switches). Otherwise those models use the search engines.
 - Apple doesn't let a web page trigger Add to Home Screen on iOS, so Nadir can only guide you through it. An installed iOS app also keeps its own storage, separate from Safari tabs; export a library file to move models across.
 
 ## Recommended next steps
-- Presolve for continuous LPs (doubleton/dominated columns) and hypersparse triangular solves.
-- Flow cover / clique cuts, plus reliability branching with strong-branching initialisation.
-- Show the dual-simplex/pivot breakdown in the results meta line.
+- Dual presolve reductions (dominated rows, implied free columns) and LU fill-reducing column ordering.
+- MIP restarts after root fixing, plus a conflict graph shared with propagation.
+- Run multiple Web Workers for parallel sweeps.

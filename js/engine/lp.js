@@ -9,6 +9,7 @@ NadirEngine.define('lp', function (E) {
     const want = o.method || 'auto';
     const cells = P.rows.length * (P.n * 2 + P.rows.length * 2 + 1);
     if (want === 'dense') return solveDense(P, o);
+    if (o.presolve && !o.basis && E.presolveLP) { const pr = E.presolveLP(P, o); if (pr) return pr; }
     let r;
     try { r = E.solveRevised(P, o); } catch (e) { r = { status: 'numerical', iterations: 0, error: e.message }; }
     if (r.status === 'numerical') {

@@ -211,10 +211,18 @@ NadirEngine.define('lu', function (E) {
     const seq = Array.from(pivCol);
     const seqPos = new Int32Array(m);
     for (let k = 0; k < m; k++) seqPos[seq[k]] = k;
-    const Ucol = new Array(m);
-    for (let c = 0; c < m; c++) Ucol[c] = [];
+    const Ucol = new Array(m), UcolV = new Array(m);
+    for (let c = 0; c < m; c++) { Ucol[c] = []; UcolV[c] = []; }
     let uNnz = 0;
-    for (let c = 0; c < m; c++) { const I = UrI[c]; uNnz += I.length; for (let t = 0; t < I.length; t++) Ucol[I[t]].push(c); }
+    for (let c = 0; c < m; c++) { const I = UrI[c], V = UrV[c]; uNnz += I.length; for (let t = 0; t < I.length; t++) { Ucol[I[t]].push(c); UcolV[I[t]].push(V[t]); } }
+    const LtS = new Int32Array(m + 1), nL = LrA.length;
+    for (let t = 0; t < nL; t++) LtS[LrA[t] + 1]++;
+    for (let i = 0; i < m; i++) LtS[i + 1] += LtS[i];
+    const LtK = new Int32Array(nL), LtV = new Float64Array(nL), fillL = LtS.slice(0, m);
+    for (let k = 0; k < m; k++) for (let t = LsA[k]; t < LsA[k + 1]; t++) { const p = fillL[LrA[t]]++; LtK[p] = pivRow[k]; LtV[p] = LvA[t]; }
+    const pivOrder = new Int32Array(m);
+    for (let k = 0; k < m; k++) pivOrder[pivRow[k]] = k;
+    const removeCol = (c, p) => { const I = Ucol[c], V = UcolV[c]; for (let t = 0; t < I.length; t++) if (I[t] === p) { I[t] = I[I.length - 1]; I.pop(); V[t] = V[V.length - 1]; V.pop(); return; } };
     const nnz0 = LrA.length + uNnz + m;
     const etaR = [], etaI = [], etaV = [];
     let etaNnz = 0;
@@ -257,15 +265,17 @@ NadirEngine.define('lu', function (E) {
         for (let t = 0; t < I.length; t++) s += V[t] * w[I[t]];
         if (s !== 0) w[etaR[e]] -= s;
       }
-      spike = w;
+      spike = Float64Array.from(w);
       const x = new Float64Array(m);
       for (let q = seq.length - 1; q >= 0; q--) {
         const c = seq[q];
         if (seqPos[c] !== q) continue;
-        let s = w[rowOf[c]];
-        const I = UrI[c], V = UrV[c];
-        for (let t = 0; t < I.length; t++) s -= V[t] * x[I[t]];
-        x[c] = s / D[c];
+        const s = w[rowOf[c]];
+        if (s === 0) continue;
+        const xc = s / D[c];
+        x[c] = xc;
+        const I = Ucol[c], V = UcolV[c];
+        for (let t = 0; t < I.length; t++) w[rowOf[I[t]]] -= V[t] * xc;
       }
       return x;
     }
@@ -289,9 +299,9 @@ NadirEngine.define('lu', function (E) {
         for (let t = 0; t < I.length; t++) v[I[t]] -= V[t] * vr;
       }
       for (let k = m - 1; k >= 0; k--) {
-        let s = 0;
-        for (let t = LsA[k]; t < LsA[k + 1]; t++) s += LvA[t] * v[LrA[t]];
-        if (s !== 0) v[pivRow[k]] -= s;
+        const i = pivRow[k], vi = v[i];
+        if (vi === 0) continue;
+        for (let t = LtS[i]; t < LtS[i + 1]; t++) v[LtK[t]] -= LtV[t] * vi;
       }
       return v;
     }
@@ -303,16 +313,16 @@ NadirEngine.define('lu', function (E) {
       const Dold = D[p];
       const col = Ucol[p];
       for (let t = 0; t < col.length; t++) { const c = col[t]; if (removeIn(UrI[c], UrV[c], p)) uNnz--; }
-      const fresh = [];
+      const fresh = [], freshV = [];
       let smax = 0;
       for (let c = 0; c < m; c++) {
         if (c === p) continue;
         const v = s[rowOf[c]];
         if (v === 0 || Math.abs(v) < DROP) continue;
-        UrI[c].push(p); UrV[c].push(v); fresh.push(c); uNnz++;
+        UrI[c].push(p); UrV[c].push(v); fresh.push(c); freshV.push(v); uNnz++;
         if (Math.abs(v) > smax) smax = Math.abs(v);
       }
-      Ucol[p] = fresh;
+      Ucol[p] = fresh; UcolV[p] = freshV;
       let dp = s[rowOf[p]];
       const oldI = UrI[p], oldV = UrV[p];
       UrI[p] = []; UrV[p] = [];
@@ -321,7 +331,7 @@ NadirEngine.define('lu', function (E) {
       seq.push(p);
       for (let t = 0; t < oldI.length; t++) {
         const c = oldI[t];
-        removeIn(Ucol[c], null, p);
+        removeCol(c, p);
         work[c] = oldV[t];
         if (!inHeap[c]) { inHeap[c] = 1; hPush(c); }
       }

@@ -230,10 +230,19 @@
       const bits = [];
       if (r.engineLabel) bits.push(r.engineLabel);
       if (r.ms != null) bits.push(r.ms < 1 ? '<1 ms' : r.ms < 1000 ? `${Math.round(r.ms)} ms` : `${(r.ms / 1000).toFixed(r.ms < 10000 ? 2 : 1)} s`);
-      if (r.engine === 'simplex' && r.pivots != null) bits.push(`${fmt(r.pivots)} ${r.pivots === 1 ? 'pivot' : 'pivots'}`);
+      const pivTxt = (total, dual) => {
+        const t = `${fmt(total)} ${total === 1 ? 'pivot' : 'pivots'}`;
+        if (!dual) return t;
+        const primal = Math.max(0, total - dual);
+        return `${t} (${fmt(primal)} primal · ${fmt(dual)} dual)`;
+      };
+      if (r.engine === 'simplex' && r.pivots != null) bits.push(pivTxt(r.pivots, r.dualPivots));
+      if (r.engine === 'bb' && r.mip && r.pivots != null) bits.push(pivTxt(r.pivots, r.mip.dualPivots));
+      if (r.lpPresolve && (r.lpPresolve.rows || r.lpPresolve.cols)) bits.push(`presolve −${fmt(r.lpPresolve.rows)} rows −${fmt(r.lpPresolve.cols)} cols`);
+      if (r.engine === 'bb' && r.mip && r.mip.strong) bits.push(`${fmt(r.mip.strong)} strong probes`);
       if (r.pwl && r.pwl.pieces) bits.push(`${fmt(r.pwl.pieces)} corner ${r.pwl.pieces === 1 ? 'piece' : 'pieces'} linearized`);
       if (r.pwl && r.pwl.switches) bits.push(`${fmt(r.pwl.switches)} ${r.pwl.switches === 1 ? 'switch' : 'switches'}`);
-      if (r.engine === 'bb' && r.nodes != null) bits.push(`${fmt(r.nodes)} nodes`);
+      if (r.engine === 'bb' && r.nodes != null) bits.push(`${fmt(r.nodes)} ${r.nodes === 1 ? 'node' : 'nodes'}`);
       if (r.engine === 'alm' && r.starts) bits.push(`${r.starts} ${r.starts === 1 ? 'start' : 'starts'}`);
       if (r.engine === 'de' && r.generations) bits.push(`${fmt(r.generations)} generations`);
       if (r.gap) bits.push(`gap ${fmt(r.gap * 100)}%`);
@@ -332,7 +341,10 @@
         const pr = r.mip.presolve;
         if (pr && pr.rowsRemoved) bits.push(`presolve dropped ${plural(pr.rowsRemoved, 'redundant rule')}`);
         if (pr && pr.boundsTightened) bits.push(`tightened ${plural(pr.boundsTightened, 'bound')}`);
-        if (r.mip.cuts) bits.push(`added ${plural(r.mip.cuts, 'cutting plane')}${r.mip.covers ? ` (${fmt(r.mip.covers)} knapsack ${r.mip.covers === 1 ? 'cover' : 'covers'})` : ''}`);
+        if (r.mip.cuts) {
+          const kinds = [r.mip.cliques ? plural(r.mip.cliques, 'clique') : '', r.mip.covers ? plural(r.mip.covers, 'knapsack cover') : '', r.mip.flows ? plural(r.mip.flows, 'flow cover') : '', r.mip.gomory ? `${fmt(r.mip.gomory)} Gomory` : ''].filter(Boolean);
+          bits.push(`added ${plural(r.mip.cuts, 'cutting plane')}${kinds.length ? ` (${kinds.join(', ')})` : ''}`);
+        }
         P.push(`<span class="faint">Before searching, Nadir ${joinWords(bits)}.</span>`);
       }
       if (r.engine === 'bb' && r.mip && r.mip.dualPivots > 0 && r.nodes > 1) P.push(`<span class="faint">Each branch restarted from its parent with the dual simplex (${esc(fmt(Math.round(100 * r.mip.dualPivots / Math.max(1, r.mip.dualPivots + r.mip.primalPivots))))}% of pivots).</span>`);

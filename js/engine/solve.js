@@ -394,7 +394,7 @@ NadirEngine.define('solve', function (E) {
       if (C.sense === 'target' && !A.goalLinear) return done({ status: 'error', message: 'Goal is nonlinear', engine });
       let r;
       if (engine === 'simplex') {
-        r = E.solveLP(LP, { deadline, maxIter: settings.maxIter, method: settings.lpMethod === 'dense' ? 'dense' : 'auto', ranging: settings.ranging && C.sense !== 'target' });
+        r = E.solveLP(LP, { deadline, maxIter: settings.maxIter, method: settings.lpMethod === 'dense' ? 'dense' : 'auto', ranging: settings.ranging && C.sense !== 'target', presolve: settings.presolve });
         if (settings.ranging && C.sense !== 'target' && r.status === 'optimal' && !r.ranging && r.method === 'dense') r.ranging = { skipped: true, reason: 'Ranging needs the revised simplex (switch LP method to Auto)' };
         R.push(r.iterations, r.obj, 0, true);
       } else {
@@ -405,7 +405,7 @@ NadirEngine.define('solve', function (E) {
         });
       }
       const iters = engine === 'bb' ? r.iterations : r.iterations;
-      const metric = engine === 'bb' ? { nodes: r.nodes, pivots: r.iterations, gap: r.gap, mip: r.stats || null } : { pivots: r.iterations, lpMethod: r.method || 'dense', lu: r.lu || null };
+      const metric = engine === 'bb' ? { nodes: r.nodes, pivots: r.iterations, gap: r.gap, mip: r.stats || null } : { pivots: r.iterations, dualPivots: r.dual || 0, lpMethod: r.method || 'dense', lu: r.lu || null, lpPresolve: r.presolve || null };
       if (r.status === 'optimal' || r.status === 'feasible') {
         if (engine === 'bb') {
           const fx = fixedIntegerLP(LP, r, settings, C.sense !== 'target');

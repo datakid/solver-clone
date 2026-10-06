@@ -1,4 +1,4 @@
-const VERSION = 'nadir-v5.1.0';
+const VERSION = 'nadir-v5.2.0';
 const CORE = [
   './',
   'index.html',
@@ -18,6 +18,7 @@ const CORE = [
   'js/engine/reform.js',
   'js/engine/lu.js',
   'js/engine/revised.js',
+  'js/engine/presolve.js',
   'js/engine/lp.js',
   'js/engine/mip.js',
   'js/engine/nlp.js',
