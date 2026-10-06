@@ -240,6 +240,10 @@
       if (r.engine === 'bb' && r.mip && r.pivots != null) bits.push(pivTxt(r.pivots, r.mip.dualPivots));
       if (r.lpPresolve && (r.lpPresolve.rows || r.lpPresolve.cols)) bits.push(`presolve −${fmt(r.lpPresolve.rows)} rows −${fmt(r.lpPresolve.cols)} cols`);
       if (r.engine === 'bb' && r.mip && r.mip.strong) bits.push(`${fmt(r.mip.strong)} strong probes`);
+      if (r.parallel && !r.parallel.noGain) bits.push(`${r.parallel.workers} workers`);
+      if (r.lu === 'dense-simd' || r.simd) bits.push('SIMD');
+      if (r.engine === 'bb' && r.mip && r.mip.orbits) bits.push(`${fmt(r.mip.orbits)} ${r.mip.orbits === 1 ? 'orbit' : 'orbits'}`);
+      if (r.engine === 'bb' && r.mip && r.mip.learned) bits.push(`${fmt(r.mip.learned)} learned`);
       if (r.engine === 'bb' && r.mip && r.mip.restarts) bits.push(`${r.mip.restarts === 1 ? 'restart' : fmt(r.mip.restarts) + ' restarts'}`);
       if (r.pwl && r.pwl.pieces) bits.push(`${fmt(r.pwl.pieces)} corner ${r.pwl.pieces === 1 ? 'piece' : 'pieces'} linearized`);
       if (r.pwl && r.pwl.switches) bits.push(`${fmt(r.pwl.switches)} ${r.pwl.switches === 1 ? 'switch' : 'switches'}`);

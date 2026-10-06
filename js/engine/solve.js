@@ -6,7 +6,7 @@ NadirEngine.define('solve', function (E) {
     balanced: { label: 'Balanced', tol: 1e-8, timeLimit: 10, multistart: 4, gap: 0.0001, patience: 150 },
     thorough: { label: 'Thorough', tol: 1e-10, timeLimit: 60, multistart: 16, gap: 0, patience: 400 }
   };
-  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true, lpMethod: 'auto', presolve: true, cuts: true, ranging: true, reform: true, bigM: true }, PRESETS.balanced);
+  const DEFAULTS = Object.assign({ preset: 'balanced', engine: 'auto', maxIter: 50000, nodeLimit: 100000, seed: 1, nonNegative: true, lpMethod: 'auto', presolve: true, cuts: true, ranging: true, reform: true, bigM: true, symmetry: true, conflicts: true }, PRESETS.balanced);
 
   function resolveSettings(s) {
     const out = Object.assign({}, DEFAULTS, s || {});
@@ -16,7 +16,7 @@ NadirEngine.define('solve', function (E) {
     }
     out.timeLimit = Math.max(0.05, out.timeLimit);
     out.lpMethod = ['auto', 'revised', 'dense'].includes(out.lpMethod) ? out.lpMethod : 'auto';
-    for (const k of ['presolve', 'cuts', 'ranging', 'reform', 'bigM']) out[k] = out[k] !== false && out[k] !== 'false';
+    for (const k of ['presolve', 'cuts', 'ranging', 'reform', 'bigM', 'symmetry', 'conflicts']) out[k] = out[k] !== false && out[k] !== 'false';
     if (out.warm && !Array.isArray(out.warm)) out.warm = null;
     out.multistart = Math.max(1, Math.round(out.multistart));
     return out;
@@ -399,13 +399,13 @@ NadirEngine.define('solve', function (E) {
         R.push(r.iterations, r.obj, 0, true);
       } else {
         const isInt = LP.integerHint;
-        r = E.branchAndBound(LP, isInt, { deadline, nodeLimit: settings.nodeLimit, gap: settings.gap, maxIter: settings.maxIter, presolve: settings.presolve, cuts: settings.cuts, classic: settings.lpMethod === 'dense' }, (ev) => {
+        r = E.branchAndBound(LP, isInt, { deadline, nodeLimit: settings.nodeLimit, gap: settings.gap, maxIter: settings.maxIter, presolve: settings.presolve, cuts: settings.cuts, symmetry: settings.symmetry, conflicts: settings.conflicts, parts: settings.parts, part: settings.part, classic: settings.lpMethod === 'dense' }, (ev) => {
           if (ev.incumbent !== undefined) R.push(ev.nodes, ev.incumbent, 0, true);
           else if (post) R.push(ev.nodes, R.history.length ? R.history[R.history.length - 1] : NaN, NaN, false);
         });
       }
       const iters = engine === 'bb' ? r.iterations : r.iterations;
-      const metric = engine === 'bb' ? { nodes: r.nodes, pivots: r.iterations, gap: r.gap, mip: r.stats || null } : { pivots: r.iterations, dualPivots: r.dual || 0, lpMethod: r.method || 'dense', lu: r.lu || null, lpPresolve: r.presolve || null };
+      const metric = engine === 'bb' ? { nodes: r.nodes, pivots: r.iterations, gap: r.gap, mip: r.stats || null } : { pivots: r.iterations, dualPivots: r.dual || 0, lpMethod: r.method || 'dense', lu: r.lu || null, simd: !!r.simd, lpPresolve: r.presolve || null };
       if (r.status === 'optimal' || r.status === 'feasible') {
         if (engine === 'bb') {
           const fx = fixedIntegerLP(LP, r, settings, C.sense !== 'target');

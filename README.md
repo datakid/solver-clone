@@ -4,6 +4,21 @@ Nadir means the lowest point, which is what an optimizer looks for. It is a vani
 
 Core loop: **type → live check → ⌘↵ → answer.**
 
+## v5.4 — conflict learning, symmetry, parallel tree search, WASM SIMD
+- **Conflict analysis** (`mip.js`). When a node fails (propagation, a conflict-graph clash, or an infeasible LP), Nadir minimises its branching path. It deletes decisions one at a time, keeping a deletion when the rest still fails: first by cheap propagation, then by a capped LP check (at most 400 probes). What remains becomes a *no-good* cut (Σ over the 0-decisions x + Σ over the 1-decisions (1−x) ≥ 1). No-goods are stored separately and checked at every node. This only applies to binary paths of 2–24 decisions, with at most 3,000 no-goods. Counters: `learned` and `learnedPrunes`.
+- **Symmetry handling (orbital reduction).** Integer columns with identical cost, bounds and row pattern form an orbit. Nadir adds the ordering x₁ ≥ x₂ ≥ … inside each orbit, which keeps one representative of every symmetric solution, so the optimum is unchanged. It runs before presolve and can be switched off (`symmetry: false`).
+- **Parallel Branch & Bound** (`worker-host.js` `solveTree`).
+  - Every worker runs the same deterministic root (presolve, cuts, restart), then expands the tree breadth-first to about 4× the worker count of open nodes. Worker *p* takes nodes *i* where *i* mod *k* = *p*.
+  - Each result carries a signature (open nodes, shared nodes and incumbent). The merged answer is proven Optimal only if all signatures match and every part finished. Otherwise it is reported as Good.
+  - **Solve** switches to the parallel search automatically (up to 4 workers) for hard MIPs, i.e. ones not proven within 1.5 s, and keeps whichever answer is better.
+- **WASM SIMD kernels** (`js/engine/wasm.js`). The module is assembled in JavaScript, so there's no binary file and no fetch, and it is checked with `WebAssembly.validate`. It provides `f64x2` axpy/dot and a sparse column pricing kernel (SpMV).
+  - The dense LU (m ≥ 48) runs its elimination, FTRAN and BTRAN through SIMD (`lu: 'dense-simd'`).
+  - The revised simplex prices with the WASM SpMV on big models (n ≥ 2,000 and nnz ≥ 8,000).
+  - Where WebAssembly SIMD isn't supported, Nadir falls back to plain JavaScript.
+  - The results are bit-for-bit the same objectives and pivot counts.
+- **Meta line.** It shows `N workers`, `SIMD`, `N orbits` and `N learned` when they apply.
+- Tests: **51 engine cases**. New: SIMD kernels vs JavaScript (axpy, dot, SpMV, dense LU residual); symmetric conflict MIPs, where orbits plus no-goods and the 3-way split match plain B&B, plus an orbit-detection unit test. Parallel tree search verified in the app: 3 workers, consistent split, same proven optimum.
+
 ## v5.3 — dual presolve, fill-aware LU, MIP restarts, conflict graph, parallel sweeps
 - **Dual presolve** (`presolve.js`).
   - *Redundant rows*: a row is dropped when its activity bounds can never break it (e.g. `≤ 1000` when the max is 300). It is checked before columns are freed, so it never relies on a freed bound.
@@ -212,12 +227,13 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 
 ## Known limits
 - The LP is single-threaded JavaScript. Around 10⁴ rows takes seconds; 10⁵+ rows would need presolve for LPs, hypersparse FTRAN/BTRAN and LU fill reduction (planned next).
-- MIP has no conflict *analysis* (learning from infeasible nodes) and no symmetry handling. Restarts happen only at the root.
+- MIP restarts happen only at the root. Symmetry handling covers identical columns only, not general permutation groups. The parallel tree split is static, with no work stealing.
+- WASM SIMD speeds up the dense kernels a lot. Sparse models are still bound by the JavaScript sparse triangular solves, so the 3k×3k LP runs at about the same speed.
 - MIP sensitivity is *conditional*: it is valid with the whole-number decisions held at their best values. NLP results have no ranging.
 - Exact switches need finite ranges on everything inside the `abs`/`max`/`min` (at most 400 switches). Otherwise those models use the search engines.
 - Apple doesn't let a web page trigger Add to Home Screen on iOS, so Nadir can only guide you through it. An installed iOS app also keeps its own storage, separate from Safari tabs; export a library file to move models across.
 
 ## Recommended next steps
-- Conflict analysis (learning cuts from infeasible nodes) and orbital fixing for symmetric models.
-- A parallel B&B tree search across the worker pool.
-- WASM SIMD kernels for FTRAN/BTRAN on very large LPs.
+- Work stealing between B&B workers, using a SharedArrayBuffer incumbent when the page is cross-origin isolated.
+- A WASM sparse triangular solve with a supernodal LU.
+- Detection of general symmetry groups (orbitopes for assignment-like models).

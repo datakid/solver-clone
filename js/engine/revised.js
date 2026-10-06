@@ -105,6 +105,7 @@ NadirEngine.define('revised', function (E) {
     } else coldStart();
 
     const B = E.LUBasis(m, getCol, { force: o.lu });
+    const SIMD = n >= 2000 && Q.nnz >= 8000 && E.wasmEnabled && E.wasmEnabled() && o.simd !== false ? E.wasm.pricer(cs, ci, cv, n, m) : null;
     let repairs = 0;
 
     function computeXB() {
@@ -250,6 +251,7 @@ NadirEngine.define('revised', function (E) {
       }
       if (!ph1) for (let i = 0; i < m; i++) cB[i] = cost[head[i]];
       const y = B.btran(cB);
+      const DY = SIMD ? SIMD.price(y) : null;
 
       let q = -1, best = 0, qd = 0, scanned = 0;
       for (let t = 0; t < N; t++) {
@@ -257,7 +259,7 @@ NadirEngine.define('revised', function (E) {
         scanned++;
         const s = stat[j];
         if (s === BASIC || lo[j] === up[j]) continue;
-        const d = (ph1 ? 0 : cost[j]) - dot(y, j);
+        const d = (ph1 ? 0 : cost[j]) - (DY && j < n ? DY[j] : dot(y, j));
         const ok = s === LOW ? d < -DTOL : s === UPP ? d > DTOL : Math.abs(d) > DTOL;
         if (!ok) continue;
         if (bland) { q = j; qd = d; break; }
@@ -340,7 +342,7 @@ NadirEngine.define('revised', function (E) {
       else { degen = 0; bland = false; }
     }
 
-    const base = { status, iterations: iter, method: 'revised', lu: B.kind, repairs, warm, dual: dualIters, dualRun };
+    const base = { status, iterations: iter, method: 'revised', lu: B.kind, repairs, warm, dual: dualIters, dualRun, simd: !!SIMD };
     if (status !== 'optimal') return base;
 
     for (let i = 0; i < m; i++) cB[i] = cost[head[i]];

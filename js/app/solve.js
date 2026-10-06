@@ -88,7 +88,7 @@
       let bestRaf = 0, bestText = '';
       const showBest = () => { bestRaf = 0; if (best.textContent !== bestText) best.textContent = bestText; };
       try {
-        const res = await W.solve(JSON.parse(JSON.stringify(S.model)), settings, (p) => {
+        const res = await (W.solveSmart || W.solve)(JSON.parse(JSON.stringify(S.model)), settings, (p) => {
           S.progress = p;
           if (Number.isFinite(p.best)) { Solve.liveHistory.push(p.best); bestText = fmt(p.best); if (!bestRaf) bestRaf = requestAnimationFrame(showBest); }
           S.emit('progress', p);

@@ -651,6 +651,65 @@ NadirEngine.define('tests', function (E) {
         }
       },
       {
+        name: 'v5.4 · WASM SIMD kernels match JavaScript (axpy, dot, SpMV pricing, dense LU)', run() {
+          if (!E.wasm) return 'WebAssembly SIMD unavailable';
+          const rand = E.mulberry32(606);
+          const m = 97, K = E.wasm.dense(m);
+          for (let i = 0; i < m; i++) { K.A[i] = rand(); K.X[i] = rand(); }
+          const a0 = Float64Array.from(K.A.subarray(0, m)), x0 = Float64Array.from(K.X);
+          K.axpy(0, K.xo, m, 0.75);
+          let e1 = 0, dd = 0;
+          for (let i = 0; i < m; i++) { e1 = Math.max(e1, Math.abs(K.A[i] - (a0[i] + 0.75 * x0[i]))); dd += K.A[i] * x0[i]; }
+          const e2 = Math.abs(K.dot(0, K.xo, m) - dd);
+          const n = 300, rows = 40, cs = new Int32Array(n + 1), ci = [], cv = [];
+          for (let j = 0; j < n; j++) { for (let t = 0; t < 3; t++) { ci.push(Math.floor(rand() * rows)); cv.push(rand() - 0.5); } cs[j + 1] = ci.length; }
+          const pr = E.wasm.pricer(cs, Int32Array.from(ci), Float64Array.from(cv), n, rows);
+          const y = Float64Array.from({ length: rows }, () => rand());
+          const out = pr.price(y);
+          let e3 = 0;
+          for (let j = 0; j < n; j++) { let s = 0; for (let p = cs[j]; p < cs[j + 1]; p++) s += cv[p] * y[ci[p]]; e3 = Math.max(e3, Math.abs(s - out[j])); }
+          const cols = [];
+          for (let k = 0; k < 120; k++) { const idx = [k], val = [3 + rand()]; for (let t = 0; t < 6; t++) { const i = Math.floor(rand() * 120); if (i !== k) { idx.push(i); val.push(rand() - 0.5); } } cols.push({ idx, val }); }
+          const f = E.luFactor(120, cols, { force: 'dense' });
+          const b = Float64Array.from({ length: 120 }, () => rand());
+          const xs = f.ftran(b), ys = f.btran(b), Bx = new Float64Array(120);
+          let e4 = 0;
+          cols.forEach((c, k) => { let s = 0; c.idx.forEach((i, t) => { Bx[i] += c.val[t] * xs[k]; s += c.val[t] * ys[i]; }); e4 = Math.max(e4, Math.abs(s - b[k])); });
+          for (let i = 0; i < 120; i++) e4 = Math.max(e4, Math.abs(Bx[i] - b[i]));
+          return (e1 < 1e-12 && e2 < 1e-10 && e3 < 1e-12 && e4 < 1e-9 && f.kind === 'dense-simd') || JSON.stringify({ e1, e2, e3, e4, kind: f.kind });
+        }
+      },
+      {
+        name: 'v5.4 · Symmetry orbits, learned conflicts and tree split stay exact', run() {
+          const rand = E.mulberry32(707);
+          const bad = [];
+          let orbits = 0, learned = 0;
+          for (let t = 0; t < 20 && bad.length < 3; t++) {
+            const types = 3 + Math.floor(rand() * 3), copies = 3 + Math.floor(rand() * 3), n = types * copies;
+            const wt = Array.from({ length: types }, () => 2 + Math.round(rand() * 7)), vt = wt.map((x) => x + Math.round(rand() * 5));
+            const w = Array.from({ length: n }, (_, i) => wt[Math.floor(i / copies)]);
+            const rows = [{ idx: w.map((_, i) => i), val: w, op: '<=', rhs: Math.round(w.reduce((s, x) => s + x, 0) * 0.4) }];
+            for (let a = 0; a < types; a++) for (let b = a + 1; b < types; b++) if (rand() < 0.3) for (let p = 0; p < copies; p++) for (let q = 0; q < copies; q++) rows.push({ idx: [a * copies + p, b * copies + q], val: [1, 1], op: '<=', rhs: 1 });
+            const c = Float64Array.from({ length: n }, (_, i) => vt[Math.floor(i / copies)]);
+            const P = { n, c, c0: 0, rows, lower: new Float64Array(n), upper: new Float64Array(n).fill(1), maximize: true };
+            const isInt = new Uint8Array(n).fill(1);
+            const a = E.solveMIP(P, isInt, { gap: 0, symmetry: false, conflicts: false, cuts: false, restart: false });
+            const b = E.solveMIP(P, isInt, { gap: 0 });
+            orbits += b.stats.orbits || 0; learned += b.stats.learned || 0;
+            if (a.status !== b.status || (a.status === 'optimal' && !close(a.obj, b.obj, 1e-6))) bad.push(`#${t} ${a.obj} vs ${b.obj}`);
+            const parts = [0, 1, 2].map((part) => E.solveMIP(P, isInt, { gap: 0, parts: 3, part, cuts: false }));
+            const sigs = parts.map((r) => r.stats.split && r.stats.split.sig);
+            const ok = parts.filter((r) => r.status === 'optimal' || r.status === 'feasible');
+            const best = ok.length ? Math.max(...ok.map((r) => r.obj)) : null;
+            if (sigs.some((s) => s !== sigs[0]) && sigs[0]) bad.push(`#${t} split diverged`);
+            if (a.status === 'optimal' && !close(best, a.obj, 1e-6)) bad.push(`#${t} split best ${best} vs ${a.obj}`);
+          }
+          const sym = E.orbitRows({ n: 4, c: [1, 1, 1, 2], rows: [{ idx: [0, 1, 2, 3], val: [1, 1, 1, 1], op: '<=', rhs: 2 }], lower: new Float64Array(4), upper: new Float64Array(4).fill(1) }, new Uint8Array(4).fill(1));
+          if (sym.orbits !== 1 || sym.rows.length !== 2) bad.push('orbit detection');
+          return (!bad.length && orbits > 0) || (bad.join('; ') || `orbits ${orbits} learned ${learned}`);
+        }
+      },
+      {
         name: 'v5 · Sparse 6,000×6,000 LP with Forrest–Tomlin updates', run() {
           const rand = E.mulberry32(23);
           const m = 6000, n = 6000;

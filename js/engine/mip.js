@@ -410,6 +410,27 @@ NadirEngine.define('mip', function (E) {
     return cuts.slice(0, maxCuts);
   }
 
+  function orbitRows(P, isInt) {
+    const n = P.n;
+    const sig = Array.from({ length: n }, () => []);
+    P.rows.forEach((r, i) => { for (let k = 0; k < r.idx.length; k++) if (r.val[k]) sig[r.idx[k]].push(i + ':' + r.val[k]); });
+    const groups = new Map();
+    for (let j = 0; j < n; j++) {
+      if (!isInt[j] || P.lower[j] === P.upper[j]) continue;
+      const key = (P.c[j] || 0) + '|' + P.lower[j] + '|' + P.upper[j] + '|' + sig[j].sort().join(',');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(j);
+    }
+    const rows = [];
+    let orbits = 0, vars = 0;
+    for (const g of groups.values()) {
+      if (g.length < 2) continue;
+      orbits++; vars += g.length;
+      for (let t = 0; t + 1 < g.length; t++) rows.push({ idx: [g[t], g[t + 1]], val: [1, -1], op: '>=', rhs: 0, sym: true });
+    }
+    return { rows, orbits, vars };
+  }
+
   function roundAndFix(P, isInt, x, lo, up, deadline) {
     const L = Float64Array.from(lo), U = Float64Array.from(up);
     for (let j = 0; j < P.n; j++) if (isInt[j]) { const v = Math.min(U[j], Math.max(L[j], Math.round(x[j]))); L[j] = v; U[j] = v; }
@@ -447,6 +468,10 @@ NadirEngine.define('mip', function (E) {
     } else P = Object.assign({}, P0, { rows: P0.rows.slice(), lower: Float64Array.from(P0.lower), upper: Float64Array.from(P0.upper) });
 
     const n = P.n;
+    if (o.symmetry !== false) {
+      const sym = orbitRows(P, isInt);
+      if (sym.rows.length) { P = Object.assign({}, P, { rows: P.rows.concat(sym.rows) }); stats.orbits = sym.orbits; stats.orbitVars = sym.vars; }
+    }
     let nodes = 0, pivots = 0;
     let inc = null, incVal = Infinity;
     const integerObj = (() => {
@@ -603,7 +628,8 @@ NadirEngine.define('mip', function (E) {
     const keepBasis = (P.n + P.rows.length) <= 20000;
     const stack = [];
     let heap = null;
-    const add = (nd) => { if (heap) heap.push(nd); else stack.push(nd); };
+    let sink = null;
+    const add = (nd) => { if (sink) sink.push(nd); else if (heap) heap.push(nd); else stack.push(nd); };
     const next = () => (heap ? (heap.size ? heap.pop() : null) : (stack.length ? stack.pop() : null));
     const toHeap = () => { if (heap) return; heap = new E.Heap((q) => q.bound); for (const s of stack) heap.push(s); stack.length = 0; };
     if (inc) toHeap();
@@ -615,44 +641,97 @@ NadirEngine.define('mip', function (E) {
       const v = r.x[bj];
       const f = v - Math.floor(v);
       const basis = keepBasis ? r.basis : null;
-      const down = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj, side: 0, frac: f };
+      const path = nd.path || [];
+      const down = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj, side: 0, frac: f, path: path.concat([[bj, 0]]) };
       down.hi[bj] = Math.floor(v);
-      const up = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj, side: 1, frac: 1 - f };
+      const up = { lo: Float64Array.from(nd.lo), hi: Float64Array.from(nd.hi), bound: val, depth: nd.depth + 1, basis, j: bj, side: 1, frac: 1 - f, path: path.concat([[bj, 1]]) };
       up.lo[bj] = Math.ceil(v);
       if (v - Math.floor(v) >= 0.5) { add(down); add(up); } else { add(up); add(down); }
     }
 
-    const rootNode = { lo: P.lower, hi: P.upper, bound: root.obj * dir, depth: 0 };
-    nodes = 1;
-    if (fractional(root.x) >= 0 && root.obj * dir < pruneAt()) branch(rootNode, root);
+    const learned = [];
+    let lpBudget = P.rows.length <= 2000 ? 400 : 0;
+    const isBinJ = (j) => isInt[j] && P.lower[j] === 0 && P.upper[j] === 1;
+    const boxOf = (decs) => { const lo = Float64Array.from(P.lower), hi = Float64Array.from(P.upper); for (const [j, s] of decs) { if (s) lo[j] = 1; else hi[j] = 0; } return [lo, hi]; };
+    const fails = (decs) => {
+      const [lo, hi] = boxOf(decs);
+      if (propagate(P.rows, lo, hi, isInt, { passes: 4 }).infeasible) return true;
+      if (G && G.edges && conflictPropagate(G, lo, hi).infeasible) return true;
+      if (learned.length && propagate(learned, lo, hi, isInt, { passes: 2 }).infeasible) return true;
+      if (lpBudget <= 0) return false;
+      lpBudget--;
+      const t = E.solveLP(P, { lower: lo, upper: hi, maxIter: 300, deadline });
+      tally(t);
+      return t.status === 'infeasible';
+    };
+    function learn(nd) {
+      const path = nd.path;
+      if (o.conflicts === false || !path || path.length < 2 || path.length > 24 || learned.length >= 3000 || Date.now() > deadline) return;
+      if (!path.every((d) => isBinJ(d[0]))) return;
+      if (!fails(path)) return;
+      let decs = path.slice();
+      for (let i = decs.length - 1, tries = 0; i >= 0 && tries < 14 && decs.length > 1; i--, tries++) {
+        const trial = decs.slice(0, i).concat(decs.slice(i + 1));
+        if (fails(trial)) decs = trial;
+      }
+      if (decs.length >= path.length) return;
+      const idx = [], val = [];
+      let rhs = 1;
+      for (const [j, s] of decs) { idx.push(j); if (s) { val.push(-1); rhs -= 1; } else val.push(1); }
+      learned.push({ idx, val, op: '>=', rhs, learned: true });
+      stats.learned = (stats.learned || 0) + 1;
+    }
 
-    for (;;) {
-      if (nodes >= nodeLimit || Date.now() > deadline) { stopped = true; break; }
-      const nd = next();
-      if (!nd) break;
-      if (nd.bound >= pruneAt()) continue;
+    function visit(nd) {
+      if (nd.bound >= pruneAt()) return;
       nodes++;
-      const pr = propagate(P.rows, nd.lo, nd.hi, isInt, { passes: 2 });
-      if (pr.infeasible) continue;
+      if (propagate(P.rows, nd.lo, nd.hi, isInt, { passes: 2 }).infeasible) { learn(nd); return; }
       if (G && G.edges) {
         const cp = conflictPropagate(G, nd.lo, nd.hi);
-        if (cp.infeasible) { stats.conflictPrunes = (stats.conflictPrunes || 0) + 1; continue; }
-        if (cp.changes) { stats.conflictFixes = (stats.conflictFixes || 0) + cp.changes; if (propagate(P.rows, nd.lo, nd.hi, isInt, { passes: 1 }).infeasible) continue; }
+        if (cp.infeasible) { stats.conflictPrunes = (stats.conflictPrunes || 0) + 1; learn(nd); return; }
+        if (cp.changes) { stats.conflictFixes = (stats.conflictFixes || 0) + cp.changes; if (propagate(P.rows, nd.lo, nd.hi, isInt, { passes: 1 }).infeasible) { learn(nd); return; } }
       }
+      if (learned.length && propagate(learned, nd.lo, nd.hi, isInt, { passes: 1 }).infeasible) { stats.learnedPrunes = (stats.learnedPrunes || 0) + 1; return; }
       const r = E.solveLP(P, { lower: nd.lo, upper: nd.hi, deadline, maxIter: o.maxIter, basis: nd.basis });
       nd.basis = null;
       if (r.warm) stats.warm++;
       tally(r);
-      if (r.status === 'limit') { stopped = true; break; }
-      if (r.status === 'infeasible') continue;
-      if (r.status === 'unbounded') { if (!inc) { unbounded = true; break; } continue; }
+      if (r.status === 'limit') return 'stop';
+      if (r.status === 'infeasible') { learn(nd); return; }
+      if (r.status === 'unbounded') return inc ? undefined : 'unbounded';
       const val = r.obj * dir;
       if (nd.j != null) pcLearn(nd.j, nd.side, nd.frac, val - nd.bound);
-      if (val >= pruneAt()) continue;
-      if (fractional(r.x) < 0) { offer(r); toHeap(); continue; }
-      if ((nodes % 40 === 0 || (!inc && nd.depth % 6 === 0)) && offer(roundAndFix(P, isInt, r.x, nd.lo, nd.hi, deadline))) { stats.heuristic++; toHeap(); if (val >= pruneAt()) continue; }
+      if (val >= pruneAt()) return;
+      if (fractional(r.x) < 0) { offer(r); toHeap(); return; }
+      if ((nodes % 40 === 0 || (!inc && nd.depth % 6 === 0)) && offer(roundAndFix(P, isInt, r.x, nd.lo, nd.hi, deadline))) { stats.heuristic++; toHeap(); if (val >= pruneAt()) return; }
       branch(nd, r);
       if (onEvent && (nodes & 31) === 0) onEvent({ nodes, ms: Date.now() - t0, bound: val });
+    }
+
+    const rootNode = { lo: P.lower, hi: P.upper, bound: root.obj * dir, depth: 0, path: [] };
+    nodes = 1;
+    const parts = Math.max(1, o.parts | 0), part = Math.max(0, Math.min(parts - 1, o.part | 0));
+    if (fractional(root.x) >= 0 && root.obj * dir < pruneAt()) {
+      if (parts > 1) {
+        sink = [];
+        branch(rootNode, root);
+        let guard = 0, halted = null;
+        while (sink.length && sink.length < parts * 4 && guard++ < 400) { const hlt = visit(sink.shift()); if (hlt) { halted = hlt; break; } }
+        const open = sink;
+        sink = null;
+        stats.split = { parts, part, open: open.length, shared: nodes, sig: open.length + ':' + nodes + ':' + (inc ? +incVal.toPrecision(12) : 'none') };
+        if (halted === 'unbounded') unbounded = true; else if (halted === 'stop') stopped = true;
+        open.forEach((nd, i) => { if (i % parts === part) add(nd); });
+      } else branch(rootNode, root);
+    }
+
+    if (!unbounded && !stopped) for (;;) {
+      if (nodes >= nodeLimit || Date.now() > deadline) { stopped = true; break; }
+      const nd = next();
+      if (!nd) break;
+      const hlt = visit(nd);
+      if (hlt === 'stop') { stopped = true; break; }
+      if (hlt === 'unbounded') { unbounded = true; break; }
     }
     let bestBound = incVal;
     if (heap && heap.size) bestBound = Math.min(bestBound, heap.a.reduce((mm, q) => Math.min(mm, q.bound), Infinity));
@@ -676,6 +755,7 @@ NadirEngine.define('mip', function (E) {
   E.flowCuts = flowCuts;
   E.cliqueCuts = cliqueCuts;
   E.conflictGraph = conflictGraph;
+  E.orbitRows = orbitRows;
   E.conflictPropagate = conflictPropagate;
   E.solveMIP = mip;
 });

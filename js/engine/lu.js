@@ -7,7 +7,8 @@ NadirEngine.define('lu', function (E) {
   const DROP = 1e-14;
 
   function denseFactor(m, cols) {
-    const A = new Float64Array(m * m);
+    const K = m >= 48 && E.wasmEnabled && E.wasmEnabled() ? E.wasm.dense(m) : null;
+    const A = K ? K.A : new Float64Array(m * m);
     for (let k = 0; k < m; k++) {
       const c = cols[k];
       for (let t = 0; t < c.idx.length; t++) A[c.idx[t] * m + k] += c.val[t];
@@ -31,7 +32,8 @@ NadirEngine.define('lu', function (E) {
         const l = f / p;
         A[i * m + k] = l;
         const ri = i * m, rs = s * m;
-        for (let j = k + 1; j < m; j++) { const u = A[rs + j]; if (u !== 0) A[ri + j] -= l * u; }
+        if (K) K.axpy((ri + k + 1) * 8, (rs + k + 1) * 8, m - k - 1, -l);
+        else for (let j = k + 1; j < m; j++) { const u = A[rs + j]; if (u !== 0) A[ri + j] -= l * u; }
       }
       s++;
     }
@@ -48,6 +50,14 @@ NadirEngine.define('lu', function (E) {
         if (zi === 0) continue;
         for (let r = i + 1; r < m; r++) { const l = A[r * m + i]; if (l !== 0) z[r] -= l * zi; }
       }
+      if (K) {
+        const X = K.X;
+        for (let i = m - 1; i >= 0; i--) {
+          const ri = i * m;
+          X[i] = (z[i] - K.dot((ri + i + 1) * 8, K.xo + (i + 1) * 8, m - i - 1)) / A[ri + i];
+        }
+        return Float64Array.from(X);
+      }
       const x = new Float64Array(m);
       for (let i = m - 1; i >= 0; i--) {
         let v = z[i];
@@ -58,14 +68,15 @@ NadirEngine.define('lu', function (E) {
       return x;
     }
     function btran(c) {
-      const w = new Float64Array(m);
+      const w = K ? K.W : new Float64Array(m);
       for (let i = 0; i < m; i++) w[i] = c[i];
       for (let i = 0; i < m; i++) {
         const ri = i * m;
         const wi = w[i] / A[ri + i];
         w[i] = wi;
         if (wi === 0) continue;
-        for (let j = i + 1; j < m; j++) { const u = A[ri + j]; if (u !== 0) w[j] -= u * wi; }
+        if (K) K.axpy(K.wo + (i + 1) * 8, (ri + i + 1) * 8, m - i - 1, -wi);
+        else for (let j = i + 1; j < m; j++) { const u = A[ri + j]; if (u !== 0) w[j] -= u * wi; }
       }
       for (let i = m - 1; i >= 0; i--) {
         let v = w[i];
@@ -76,7 +87,7 @@ NadirEngine.define('lu', function (E) {
       for (let i = 0; i < m; i++) y[rowAt[i]] = w[i];
       return y;
     }
-    return { ok: true, ftran, btran, kind: 'dense', nnz: m * m };
+    return { ok: true, ftran, btran, kind: K ? 'dense-simd' : 'dense', nnz: m * m };
   }
 
   function sparseFactor(m, cols) {
