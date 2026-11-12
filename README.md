@@ -273,3 +273,7 @@ The JSON matches the spec (§6): `{format:"nadir", version:1, id, name, notes, g
 - Supernode detection in the sparse LU, so it can use dense SIMD blocks.
 - Keep the WASM U-solve after Forrest–Tomlin updates (patch the CSR in place).
 - Orbital fixing in the tree, using the detected automorphism generators (today they're only used as root ordering rows).
+
+## License
+
+MIT. See `LICENSE`.
